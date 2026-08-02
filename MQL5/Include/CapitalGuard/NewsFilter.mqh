@@ -119,6 +119,45 @@ public:
         }
       return(false);
      }
+
+   //--- soft check: a high-impact event exists within `lookaheadMin`
+   //--- minutes (beyond the hard block window). Used to degrade the
+   //--- news score before the hard pause kicks in.
+   bool              NearbyEvent(const int lookaheadMin, string &outDesc)
+     {
+      outDesc = "";
+      if(!m_enabled) return(false);
+      datetime now = TimeCurrent();
+
+      //--- manual list first
+      for(int i = 0; i < ArraySize(m_manualTimes); i++)
+        {
+         if(m_manualTimes[i] > now && m_manualTimes[i] <= now + lookaheadMin * 60)
+           {
+            outDesc = "Manual event at " + TimeToString(m_manualTimes[i], TIME_DATE|TIME_MINUTES);
+            return(true);
+           }
+        }
+
+      //--- economic calendar
+      MqlCalendarValue values[];
+      if(!CalendarValueHistory(values, now, now + lookaheadMin * 60))
+         return(false);
+      int total = ArraySize(values);
+      for(int i = 0; i < total; i++)
+        {
+         MqlCalendarEvent event;
+         if(!CalendarEventById(values[i].event_id, event)) continue;
+         if(event.importance != CALENDAR_IMPORTANCE_HIGH)  continue;
+         MqlCalendarCountry country;
+         if(!CalendarCountryById(event.country_id, country)) continue;
+         if(!CurrencyRelevant(country.currency)) continue;
+         outDesc = StringFormat("%s (%s) at %s", event.name, country.currency,
+                                TimeToString(values[i].time, TIME_DATE|TIME_MINUTES));
+         return(true);
+        }
+      return(false);
+     }
   };
 
 #endif // CG_NEWS_FILTER_MQH

@@ -76,12 +76,17 @@ public:
       string ts  = TimeToString(TimeCurrent(), TIME_DATE|TIME_SECONDS);
       double rr  = (MathAbs(entry - sl) > 0.0) ? MathAbs(tp - entry) / MathAbs(entry - sl) : 0.0;
 
-      string csvHeader = "event,time,ticket,symbol,dir,entry,sl,tp,lot,planned_rr,score,trend,momentum,volume,structure,volatility,regime,session,reason,sizing,profit,realized_rr";
-      string csv = StringFormat("OPEN,%s,%I64u,%s,%s,%.5f,%.5f,%.5f,%.2f,%.2f,%.1f,%.0f,%.0f,%.0f,%.0f,%.0f,%s,%s,%s,%s,,",
+      string csvHeader = "event,time,ticket,symbol,dir,entry,sl,tp,lot,planned_rr,score,"
+                         "trend,structure,momentum,volume,liquidity,volatility,news,rr,spread,session_q,"
+                         "regime,session,reason,sizing,profit,realized_rr";
+      string csv = StringFormat("OPEN,%s,%I64u,%s,%s,%.5f,%.5f,%.5f,%.2f,%.2f,%.1f,"
+                                "%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,"
+                                "%s,%s,%s,%s,,",
                                 ts, ticket, symbol, direction > 0 ? "BUY" : "SELL",
                                 entry, sl, tp, lot, rr, sig.total,
-                                sig.trendScore, sig.momentumScore, sig.volumeScore,
-                                sig.structureScore, sig.volatilityScore,
+                                sig.trendScore, sig.structureScore, sig.momentumScore,
+                                sig.volumeScore, sig.liquidityScore, sig.volatilityScore,
+                                sig.newsScore, sig.rrScore, sig.spreadScore, sig.sessionScore,
                                 CsvEscape(regime), CsvEscape(session),
                                 CsvEscape(sig.reason), CsvEscape(sizingNote));
       AppendLine(m_csvFile, csv, csvHeader);
@@ -89,13 +94,15 @@ public:
       string json = StringFormat(
          "{\"event\":\"open\",\"time\":\"%s\",\"ticket\":%I64u,\"symbol\":\"%s\",\"dir\":\"%s\","
          "\"entry\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"lot\":%.2f,\"planned_rr\":%.2f,"
-         "\"score\":%.1f,\"scores\":{\"trend\":%.0f,\"momentum\":%.0f,\"volume\":%.0f,"
-         "\"structure\":%.0f,\"volatility\":%.0f},\"regime\":\"%s\",\"session\":\"%s\","
+         "\"score\":%.1f,\"scores\":{\"trend\":%.0f,\"structure\":%.0f,\"momentum\":%.0f,"
+         "\"volume\":%.0f,\"liquidity\":%.0f,\"volatility\":%.0f,\"news\":%.0f,"
+         "\"rr\":%.0f,\"spread\":%.0f,\"session\":%.0f},\"regime\":\"%s\",\"session\":\"%s\","
          "\"reason\":\"%s\",\"sizing\":\"%s\"}",
          ts, ticket, symbol, direction > 0 ? "BUY" : "SELL",
          entry, sl, tp, lot, rr, sig.total,
-         sig.trendScore, sig.momentumScore, sig.volumeScore,
-         sig.structureScore, sig.volatilityScore,
+         sig.trendScore, sig.structureScore, sig.momentumScore,
+         sig.volumeScore, sig.liquidityScore, sig.volatilityScore,
+         sig.newsScore, sig.rrScore, sig.spreadScore, sig.sessionScore,
          JsonEscape(regime), JsonEscape(session),
          JsonEscape(sig.reason), JsonEscape(sizingNote));
       AppendLine(m_jsonFile, json, "");

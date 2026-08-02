@@ -99,6 +99,9 @@ public:
                            risk.DayPLPercent(), risk.WeekPLPercent(), monthProfit);
       text += StringFormat("  Drawdown: %.2f%%   Risk scale: x%.2f\n",
                            risk.DrawdownPercent(), risk.RiskScale());
+      text += StringFormat("  Risk/trade: %.2f%% (effective %.2f%%)   Spread: %d pts\n",
+                           risk.RiskPerTrade(), risk.EffectiveRisk(),
+                           (int)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD));
       text += StringFormat("  Daily target: %.1f%%  [%s]\n",
                            risk.DailyTargetPct(),
                            risk.DailyTargetReached() ? "REACHED" : "working");

@@ -239,6 +239,9 @@ public:
    double            DayStartBalance()  const { return(m_dayStartBalance); }
    double            WeekStartBalance() const { return(m_weekStartBalance); }
    double            DailyTargetPct()   const { return(m_dailyTargetPct); }
+   double            RiskPerTrade()     const { return(m_riskPerTrade); }
+   //--- effective risk % after the drawdown-based reduction
+   double            EffectiveRisk()    const { return(m_riskPerTrade * RiskScale()); }
   };
 
 #endif // CG_RISK_MANAGER_MQH

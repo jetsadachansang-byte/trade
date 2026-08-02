@@ -3,7 +3,8 @@
 //|  CapitalGuard - Indicator bundle for one timeframe               |
 //|                                                                  |
 //|  Wraps: EMA 20/50/200, VWAP (session), RSI, MACD, ATR, ADX,      |
-//|         Bollinger Bands, OBV, tick volume                        |
+//|         Bollinger Bands, OBV, CMF, Ichimoku, SuperTrend,         |
+//|         Daily Pivot Points, tick volume                          |
 //+------------------------------------------------------------------+
 #ifndef CG_INDICATOR_SET_MQH
 #define CG_INDICATOR_SET_MQH
@@ -25,6 +26,7 @@ private:
    int               m_hAdx;
    int               m_hBands;
    int               m_hObv;
+   int               m_hIchimoku;
 
    //--- read one value from an indicator buffer; EMPTY_VALUE on failure
    double            Buf(const int handle, const int buffer, const int shift) const
@@ -40,7 +42,7 @@ public:
                                        m_hEma200(INVALID_HANDLE), m_hRsi(INVALID_HANDLE),
                                        m_hMacd(INVALID_HANDLE), m_hAtr(INVALID_HANDLE),
                                        m_hAdx(INVALID_HANDLE), m_hBands(INVALID_HANDLE),
-                                       m_hObv(INVALID_HANDLE) {}
+                                       m_hObv(INVALID_HANDLE), m_hIchimoku(INVALID_HANDLE) {}
 
    //--- create all indicator handles for the given timeframe
    bool              Init(const string symbol, const ENUM_TIMEFRAMES tf,
@@ -59,11 +61,12 @@ public:
       m_hAdx    = iADX(symbol, tf, adxPeriod);
       m_hBands  = iBands(symbol, tf, bbPeriod, 0, bbDev, PRICE_CLOSE);
       m_hObv    = iOBV(symbol, tf, VOLUME_TICK);
+      m_hIchimoku = iIchimoku(symbol, tf, 9, 26, 52);
       return(m_hEma20 != INVALID_HANDLE && m_hEma50 != INVALID_HANDLE &&
              m_hEma200 != INVALID_HANDLE && m_hRsi != INVALID_HANDLE &&
              m_hMacd != INVALID_HANDLE && m_hAtr != INVALID_HANDLE &&
              m_hAdx != INVALID_HANDLE && m_hBands != INVALID_HANDLE &&
-             m_hObv != INVALID_HANDLE);
+             m_hObv != INVALID_HANDLE && m_hIchimoku != INVALID_HANDLE);
      }
 
    //--- release all handles; call from OnDeinit
@@ -78,6 +81,7 @@ public:
       if(m_hAdx    != INVALID_HANDLE) IndicatorRelease(m_hAdx);
       if(m_hBands  != INVALID_HANDLE) IndicatorRelease(m_hBands);
       if(m_hObv    != INVALID_HANDLE) IndicatorRelease(m_hObv);
+      if(m_hIchimoku != INVALID_HANDLE) IndicatorRelease(m_hIchimoku);
      }
 
    //--- value accessors (shift 1 = last closed bar)
@@ -152,6 +156,88 @@ public:
         }
       if(vv <= 0.0) return(EMPTY_VALUE);
       return(pv / vv);
+     }
+
+   //--- Ichimoku accessors (9/26/52)
+   double            Tenkan(const int shift) const { return(Buf(m_hIchimoku, 0, shift)); }
+   double            Kijun(const int shift)  const { return(Buf(m_hIchimoku, 1, shift)); }
+   double            SpanA(const int shift)  const { return(Buf(m_hIchimoku, 2, shift)); }
+   double            SpanB(const int shift)  const { return(Buf(m_hIchimoku, 3, shift)); }
+
+   //--- Ichimoku bias: +1 price above cloud & Tenkan>Kijun, -1 opposite
+   int               IchimokuBias() const
+     {
+      double c  = Close(1);
+      double sa = SpanA(1), sb = SpanB(1);
+      double tk = Tenkan(1), kj = Kijun(1);
+      if(c == 0.0 || sa == EMPTY_VALUE || sb == EMPTY_VALUE ||
+         tk == EMPTY_VALUE || kj == EMPTY_VALUE)
+         return(0);
+      double cloudTop = MathMax(sa, sb);
+      double cloudBot = MathMin(sa, sb);
+      if(c > cloudTop && tk > kj) return(1);
+      if(c < cloudBot && tk < kj) return(-1);
+      return(0);
+     }
+
+   //--- Chaikin Money Flow over `bars` closed bars (-1..+1)
+   double            Cmf(const int bars) const
+     {
+      MqlRates rates[];
+      if(CopyRates(m_symbol, m_tf, 1, bars, rates) < bars) return(0.0);
+      double mfvSum = 0.0, volSum = 0.0;
+      for(int i = 0; i < bars; i++)
+        {
+         double range = rates[i].high - rates[i].low;
+         if(range <= 0.0) continue;
+         double mult = ((rates[i].close - rates[i].low) - (rates[i].high - rates[i].close)) / range;
+         double vol  = (double)rates[i].tick_volume;
+         mfvSum += mult * vol;
+         volSum += vol;
+        }
+      if(volSum <= 0.0) return(0.0);
+      return(mfvSum / volSum);
+     }
+
+   //--- SuperTrend direction at the last closed bar: +1 up, -1 down
+   //--- computed from (H+L)/2 +/- mult*ATR with standard band trailing
+   int               SuperTrendDir(const double mult, const int lookback) const
+     {
+      MqlRates rates[];
+      double atrBuf[];
+      if(CopyRates(m_symbol, m_tf, 0, lookback, rates) < lookback) return(0);
+      if(m_hAtr == INVALID_HANDLE) return(0);
+      if(CopyBuffer(m_hAtr, 0, 0, lookback, atrBuf) < lookback) return(0);
+      //--- both arrays ordered oldest..newest over the same bars
+      int    dir = 1;
+      double fu = 0.0, fl = 0.0;    // final upper / lower bands
+      int    last = lookback - 1;   // index of the forming bar
+      for(int i = 1; i < last; i++)  // stop at the last CLOSED bar
+        {
+         double mid = (rates[i].high + rates[i].low) / 2.0;
+         double bu  = mid + mult * atrBuf[i];
+         double bl  = mid - mult * atrBuf[i];
+         if(i == 1) { fu = bu; fl = bl; }
+         //--- classic band trailing rules
+         if(bu < fu || rates[i - 1].close > fu) fu = bu;
+         if(bl > fl || rates[i - 1].close < fl) fl = bl;
+         if(dir == 1 && rates[i].close < fl)      dir = -1;
+         else if(dir == -1 && rates[i].close > fu) dir = 1;
+        }
+      return(dir);
+     }
+
+   //--- classic daily pivot points from the previous D1 candle
+   void              DailyPivots(double &p, double &r1, double &s1, double &r2, double &s2) const
+     {
+      double h = iHigh(m_symbol, PERIOD_D1, 1);
+      double l = iLow(m_symbol, PERIOD_D1, 1);
+      double c = iClose(m_symbol, PERIOD_D1, 1);
+      p  = (h + l + c) / 3.0;
+      r1 = 2.0 * p - l;
+      s1 = 2.0 * p - h;
+      r2 = p + (h - l);
+      s2 = p - (h - l);
      }
 
    //--- EMA-stack trend of this timeframe: +1 up, -1 down, 0 mixed
