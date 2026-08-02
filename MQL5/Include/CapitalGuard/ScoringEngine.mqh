@@ -1,15 +1,19 @@
 //+------------------------------------------------------------------+
 //|                                              ScoringEngine.mqh   |
-//|  CapitalGuard v2 - Weighted confluence decision engine           |
+//|  CapitalGuard v3 - SMC-first confidence scoring                  |
 //|                                                                  |
-//|  Ten scored categories combined into a 0-100 confidence score:   |
-//|    Trend 20% | Market Structure 20% | Momentum 15% | Volume 10%  |
-//|    Liquidity (SMC) 10% | Volatility 10% | News 10% | RR 5% |     |
-//|    Spread 5% | Session 5%                                        |
+//|  Smart Money Concepts are the PRIMARY decision system.           |
+//|  Indicators only confirm - they can never be the reason to       |
+//|  open a trade.                                                   |
 //|                                                                  |
-//|  A trade needs the total to clear the threshold (default 90)     |
-//|  AND every hard checklist item enabled in the EA to pass.        |
-//|  Higher-timeframe conflict always vetoes the trade.              |
+//|  Categories and default weights:                                 |
+//|    Market Structure 25% | Liquidity 20% | BOS/CHoCH 20% |        |
+//|    Order Block 15% | FVG 10% | Volume 5% |                       |
+//|    Indicator Confirmation 5%                                     |
+//|                                                                  |
+//|  Direction comes from STRUCTURE (D1/H4/H1 swing patterns),       |
+//|  never from indicators. Entry requires total >= threshold        |
+//|  (default 90) plus the EA's sequential SMC pipeline.             |
 //+------------------------------------------------------------------+
 #ifndef CG_SCORING_ENGINE_MQH
 #define CG_SCORING_ENGINE_MQH
@@ -19,16 +23,12 @@
 #include "Regime.mqh"
 #include "SmartMoney.mqh"
 
-//--- extra market context the EA supplies for scoring
+//--- extra context the EA supplies for scoring
 struct SScoreContext
   {
-   double            spreadPoints;     // current spread in points
-   double            maxSpreadPoints;  // EA spread limit (for ratio scoring)
-   string            session;          // "Overlap"/"London"/"NewYork"/"Asian"/""
-   bool              newsClear;        // no high-impact event blocking now
-   bool              newsNearby;       // high-impact event within soft window
-   double            plannedRR;        // TP distance / SL distance of this setup
-   SSmartMoney       smc;              // smart-money scan result
+   SSmcAnalysis      smc;              // smart-money snapshot (entry TF)
+   double            plannedRR;        // TP distance / SL distance
+   string            session;          // for the reason string only
   };
 
 //--- full evaluation result for one candidate signal
@@ -36,159 +36,149 @@ struct SSignal
   {
    int               direction;        // +1 buy, -1 sell, 0 no trade
    double            total;            // weighted total 0-100
-   double            trendScore;
-   double            structureScore;
-   double            momentumScore;
-   double            volumeScore;
-   double            liquidityScore;
-   double            volatilityScore;
-   double            newsScore;
-   double            rrScore;
-   double            spreadScore;
-   double            sessionScore;
+   double            structureScore;   // Market Structure (25%)
+   double            liquidityScore;   // Liquidity (20%)
+   double            bosChochScore;    // BOS / CHoCH (20%)
+   double            obScore;          // Order Block (15%)
+   double            fvgScore;         // FVG (10%)
+   double            volumeScore;      // Volume (5%)
+   double            indicatorScore;   // Indicator confirmation (5%)
    string            reason;           // human-readable explanation
   };
 
 //+------------------------------------------------------------------+
-//| Weighted scoring engine                                          |
+//| SMC-first scoring engine                                         |
 //+------------------------------------------------------------------+
 class CScoringEngine
   {
 private:
    //--- category weights, normalized to sum 1.0 in Init
-   double            m_wTrend, m_wStructure, m_wMomentum, m_wVolume, m_wLiquidity;
-   double            m_wVolatility, m_wNews, m_wRR, m_wSpread, m_wSession;
+   double            m_wStructure, m_wLiquidity, m_wBosChoch, m_wOB;
+   double            m_wFVG, m_wVolume, m_wIndicator;
 
    //--- clamp helper
    double            Clamp(const double v) const { return(MathMax(0.0, MathMin(100.0, v))); }
 
+   //--- does this timeframe's structure support direction `dir`?
+   //--- trend match = full, bias-only match = partial, opposing = veto
+   double            TfSupport(const SStructureInfo &st, const int dir) const
+     {
+      ENUM_MS_TREND want = (dir > 0) ? MS_UPTREND : MS_DOWNTREND;
+      ENUM_MS_TREND against = (dir > 0) ? MS_DOWNTREND : MS_UPTREND;
+      if(st.trend == want)    return(1.0);
+      if(st.trend == against) return(-1.0);
+      if(st.bias == dir)      return(0.5);    // sideways swings, bias agrees
+      if(st.bias == -dir)     return(-0.5);
+      return(0.0);
+     }
+
 public:
    //--- configure weights (any scale; normalized internally)
-   void              Init(const double wTrend, const double wStructure, const double wMomentum,
-                          const double wVolume, const double wLiquidity, const double wVolatility,
-                          const double wNews, const double wRR, const double wSpread,
-                          const double wSession)
+   void              Init(const double wStructure, const double wLiquidity, const double wBosChoch,
+                          const double wOB, const double wFVG, const double wVolume,
+                          const double wIndicator)
      {
-      double sum = wTrend + wStructure + wMomentum + wVolume + wLiquidity
-                 + wVolatility + wNews + wRR + wSpread + wSession;
+      double sum = wStructure + wLiquidity + wBosChoch + wOB + wFVG + wVolume + wIndicator;
       if(sum <= 0.0) sum = 1.0;
-      m_wTrend      = wTrend / sum;
-      m_wStructure  = wStructure / sum;
-      m_wMomentum   = wMomentum / sum;
-      m_wVolume     = wVolume / sum;
-      m_wLiquidity  = wLiquidity / sum;
-      m_wVolatility = wVolatility / sum;
-      m_wNews       = wNews / sum;
-      m_wRR         = wRR / sum;
-      m_wSpread     = wSpread / sum;
-      m_wSession    = wSession / sum;
+      m_wStructure = wStructure / sum;
+      m_wLiquidity = wLiquidity / sum;
+      m_wBosChoch  = wBosChoch / sum;
+      m_wOB        = wOB / sum;
+      m_wFVG       = wFVG / sum;
+      m_wVolume    = wVolume / sum;
+      m_wIndicator = wIndicator / sum;
      }
 
-   //--- candidate direction from higher-timeframe votes;
-   //--- 0 when H4 and H1 conflict (hard multi-TF veto)
-   int               DecideDirection(CIndicatorSet &h4, CIndicatorSet &h1, CIndicatorSet &m15)
+   //--- trade direction from MARKET STRUCTURE ONLY (never indicators):
+   //--- H4 and H1 structure must agree; D1 must not actively oppose.
+   //--- Counter-trend is only allowed when the entry TF printed a
+   //--- CHoCH (clear reversal signal) - handled by the EA pipeline.
+   int               DecideDirection(const SStructureInfo &d1, const SStructureInfo &h4,
+                                     const SStructureInfo &h1)
      {
-      int tH4  = h4.TrendDirection();
-      int tH1  = h1.TrendDirection();
-      int tM15 = m15.TrendDirection();
-      if(tH4 != 0 && tH1 != 0 && tH4 != tH1)
-         return(0);
-      int vote = tH4 * 2 + tH1 * 2 + tM15;
-      if(vote >= 2)  return(1);
-      if(vote <= -2) return(-1);
-      return(0);
+      int dirH4 = (h4.trend == MS_UPTREND) ? 1 : (h4.trend == MS_DOWNTREND) ? -1 : h4.bias;
+      int dirH1 = (h1.trend == MS_UPTREND) ? 1 : (h1.trend == MS_DOWNTREND) ? -1 : h1.bias;
+      if(dirH4 == 0 || dirH1 == 0) return(0);   // structure unclear = wait
+      if(dirH4 != dirH1)           return(0);   // HTF conflict = wait
+      //--- D1 actively opposing vetoes the idea
+      int dirD1 = (d1.trend == MS_UPTREND) ? 1 : (d1.trend == MS_DOWNTREND) ? -1 : 0;
+      if(dirD1 != 0 && dirD1 != dirH4) return(0);
+      return(dirH4);
      }
 
-   //--- Trend 20%: EMA stacks on H4/H1/M15, VWAP side, Ichimoku, SuperTrend
-   double            ScoreTrend(const int dir, CIndicatorSet &h4, CIndicatorSet &h1,
-                                CIndicatorSet &m15, CIndicatorSet &entry)
+   //--- Market Structure 25%: every timeframe must support the move
+   double            ScoreStructure(const int dir, const SStructureInfo &d1,
+                                    const SStructureInfo &h4, const SStructureInfo &h1,
+                                    const SStructureInfo &entry)
      {
       double score = 0.0;
-      if(h4.TrendDirection()  == dir) score += 25.0;
-      if(h1.TrendDirection()  == dir) score += 20.0;
-      if(m15.TrendDirection() == dir) score += 15.0;
-      double vwap = entry.SessionVWAP();
-      double c    = entry.Close(1);
-      if(vwap != EMPTY_VALUE && c > 0.0)
-        {
-         if(dir > 0 && c > vwap) score += 15.0;
-         if(dir < 0 && c < vwap) score += 15.0;
-        }
-      if(h1.IchimokuBias() == dir) score += 15.0;
-      if(entry.SuperTrendDir(3.0, 120) == dir) score += 10.0;
+      double sD1 = TfSupport(d1, dir);
+      double sH4 = TfSupport(h4, dir);
+      double sH1 = TfSupport(h1, dir);
+      double sEn = TfSupport(entry, dir);
+      score += 20.0 * MathMax(0.0, sD1);
+      score += 30.0 * MathMax(0.0, sH4);
+      score += 30.0 * MathMax(0.0, sH1);
+      score += 20.0 * MathMax(0.0, sEn);
       return(Clamp(score));
      }
 
-   //--- Structure 20%: bias match, BOS, CHoCH, Fibonacci golden-zone pullback
-   double            ScoreStructure(const int dir, const SStructureInfo &st, CIndicatorSet &entry)
+   //--- Liquidity 20%: sweep already happened (fuel), a target pool
+   //--- exists in profit direction, and price sits on the right side
+   //--- of the dealing range
+   double            ScoreLiquidity(const int dir, const SSmcAnalysis &smc)
      {
       double score = 0.0;
-      if(st.bias == dir)        score += 40.0;
-      else if(st.bias == 0)     score += 10.0;
-      if(st.recentBOS && st.bias == dir)   score += 30.0;
-      if(st.recentCHoCH && st.bias == dir) score += 15.0;
-      //--- Fibonacci: entry inside the 38.2-61.8% retracement of the
-      //--- last swing leg is a discounted price in the trade direction
-      double c = entry.Close(1);
-      if(c > 0.0 && st.lastSwingHigh > st.lastSwingLow && st.lastSwingLow > 0.0)
+      if(dir > 0)
         {
-         double range = st.lastSwingHigh - st.lastSwingLow;
-         if(range > 0.0)
-           {
-            double retr = (dir > 0) ? (st.lastSwingHigh - c) / range
-                                    : (c - st.lastSwingLow) / range;
-            if(retr >= 0.382 && retr <= 0.618) score += 15.0;
-           }
+         if(smc.sweepBull)     score += 50.0;   // sell-side grabbed = longs fueled
+         if(smc.bslAbovePrice) score += 25.0;   // buy-side pool above = TP magnet
+         if(smc.rangePos <= 0.5) score += 25.0; // buying in discount
+        }
+      else
+        {
+         if(smc.sweepBear)     score += 50.0;
+         if(smc.sslBelowPrice) score += 25.0;
+         if(smc.rangePos >= 0.5) score += 25.0; // selling in premium
         }
       return(Clamp(score));
      }
 
-   //--- Momentum 15%: RSI zone+slope, MACD (entry+H1), DI, Tenkan/Kijun
-   double            ScoreMomentum(const int dir, CIndicatorSet &entry, CIndicatorSet &h1)
+   //--- BOS/CHoCH 20%: a structure break in our direction is the
+   //--- primary entry signal (MSS = CHoCH after a trend)
+   double            ScoreBosChoch(const int dir, const SStructureInfo &entry)
      {
       double score = 0.0;
-      double rsi = entry.Rsi(1), rsiPrev = entry.Rsi(2);
-      if(rsi != EMPTY_VALUE && rsiPrev != EMPTY_VALUE)
-        {
-         if(dir > 0)
-           {
-            if(rsi > 50.0 && rsi < 70.0) score += 20.0;   // bullish, not overbought
-            if(rsi > rsiPrev)            score += 10.0;
-           }
-         else
-           {
-            if(rsi < 50.0 && rsi > 30.0) score += 20.0;
-            if(rsi < rsiPrev)            score += 10.0;
-           }
-        }
-      double mm = entry.MacdMain(1), ms = entry.MacdSignal(1);
-      if(mm != EMPTY_VALUE && ms != EMPTY_VALUE)
-        {
-         if(dir > 0 && mm > ms) score += 20.0;
-         if(dir < 0 && mm < ms) score += 20.0;
-        }
-      double hm = h1.MacdMain(1), hs = h1.MacdSignal(1);
-      if(hm != EMPTY_VALUE && hs != EMPTY_VALUE)
-        {
-         if(dir > 0 && hm > hs) score += 15.0;
-         if(dir < 0 && hm < hs) score += 15.0;
-        }
-      double pdi = entry.PlusDI(1), mdi = entry.MinusDI(1);
-      if(pdi != EMPTY_VALUE && mdi != EMPTY_VALUE)
-        {
-         if(dir > 0 && pdi > mdi) score += 15.0;
-         if(dir < 0 && mdi > pdi) score += 15.0;
-        }
-      double tk = entry.Tenkan(1), kj = entry.Kijun(1);
-      if(tk != EMPTY_VALUE && kj != EMPTY_VALUE)
-        {
-         if(dir > 0 && tk > kj) score += 20.0;
-         if(dir < 0 && tk < kj) score += 20.0;
-        }
+      if(entry.bias == dir && entry.recentBOS)   score += 60.0;
+      if(entry.bias == dir && entry.recentCHoCH) score += 40.0;
       return(Clamp(score));
      }
 
-   //--- Volume 10%: participation vs average, OBV slope, CMF sign
+   //--- Order Block 15%: the zone's own quality score, discounted
+   //--- when price is not yet mitigating it
+   double            ScoreOrderBlock(const int dir, const SSmcAnalysis &smc)
+     {
+      SOrderBlock ob;
+      if(dir > 0) ob = smc.obBull; else ob = smc.obBear;
+      if(!ob.valid) return(0.0);
+      double score = ob.quality;
+      if(!ob.mitigating) score *= 0.5;     // zone exists but price not there yet
+      return(Clamp(score));
+     }
+
+   //--- FVG 10%: imbalance exists; mitigation (price returned into
+   //--- the gap) is the high-probability moment
+   double            ScoreFVG(const int dir, const SSmcAnalysis &smc)
+     {
+      double score = 0.0;
+      bool exists    = (dir > 0) ? smc.fvgBull : smc.fvgBear;
+      bool mitigated = (dir > 0) ? smc.fvgBullMitigated : smc.fvgBearMitigated;
+      if(exists)    score += 50.0;
+      if(mitigated) score += 50.0;
+      return(Clamp(score));
+     }
+
+   //--- Volume 5%: participation behind the move
    double            ScoreVolume(const int dir, CIndicatorSet &entry)
      {
       double score = 0.0;
@@ -200,141 +190,79 @@ public:
       if(obv == dir)     score += 35.0;
       else if(obv == 0)  score += 10.0;
       double cmf = entry.Cmf(20);
-      if(dir > 0 && cmf > 0.0)  score += 25.0;
-      if(dir < 0 && cmf < 0.0)  score += 25.0;
+      if(dir > 0 && cmf > 0.0) score += 25.0;
+      if(dir < 0 && cmf < 0.0) score += 25.0;
       return(Clamp(score));
      }
 
-   //--- Liquidity 10%: sweep, order block retest, fair value gap
-   double            ScoreLiquidity(const int dir, const SSmartMoney &smc)
+   //--- Indicator confirmation 5%: EMA/VWAP/RSI/MACD may only AGREE
+   //--- or stay neutral - they carry too little weight to drive entry
+   double            ScoreIndicator(const int dir, CIndicatorSet &entry, CIndicatorSet &h1)
      {
       double score = 0.0;
-      if(dir > 0)
+      if(entry.TrendDirection() == dir) score += 25.0;
+      double vwap = entry.SessionVWAP();
+      double c    = entry.Close(1);
+      if(vwap != EMPTY_VALUE && c > 0.0)
         {
-         if(smc.sweepBull) score += 40.0;   // stop-hunt done = fuel for longs
-         if(smc.obBull)    score += 30.0;   // entering from institutional zone
-         if(smc.fvgBull)   score += 30.0;   // imbalance supports the move
+         if(dir > 0 && c > vwap) score += 25.0;
+         if(dir < 0 && c < vwap) score += 25.0;
         }
-      else
+      double rsi = entry.Rsi(1);
+      if(rsi != EMPTY_VALUE)
         {
-         if(smc.sweepBear) score += 40.0;
-         if(smc.obBear)    score += 30.0;
-         if(smc.fvgBear)   score += 30.0;
+         if(dir > 0 && rsi > 50.0 && rsi < 70.0) score += 25.0;
+         if(dir < 0 && rsi < 50.0 && rsi > 30.0) score += 25.0;
+        }
+      double mm = h1.MacdMain(1), ms = h1.MacdSignal(1);
+      if(mm != EMPTY_VALUE && ms != EMPTY_VALUE)
+        {
+         if(dir > 0 && mm > ms) score += 25.0;
+         if(dir < 0 && mm < ms) score += 25.0;
         }
       return(Clamp(score));
-     }
-
-   //--- Volatility 10%: regime state, Bollinger position, ATR band
-   double            ScoreVolatility(const SRegimeInfo &regime, CIndicatorSet &entry, const int dir)
-     {
-      double score = 0.0;
-      switch(regime.vol)
-        {
-         case VOL_NORMAL: score += 50.0; break;
-         case VOL_LOW:    score += 30.0; break;
-         case VOL_HIGH:   score += 15.0; break;
-        }
-      double c = entry.Close(1), bu = entry.BandUpper(1), bl = entry.BandLower(1);
-      if(c > 0.0 && bu != EMPTY_VALUE && bl != EMPTY_VALUE && bu > bl)
-        {
-         double pos = (c - bl) / (bu - bl);
-         if(dir > 0 && pos < 0.75) score += 30.0;   // not buying the top band
-         if(dir < 0 && pos > 0.25) score += 30.0;
-        }
-      //--- ATR inside the healthy band (not dead, not chaotic)
-      if(regime.atrRatio >= 0.7 && regime.atrRatio <= 1.4) score += 20.0;
-      return(Clamp(score));
-     }
-
-   //--- News 10%: clear = full score, event looming = degraded
-   double            ScoreNews(const SScoreContext &ctx)
-     {
-      if(!ctx.newsClear)  return(0.0);
-      if(ctx.newsNearby)  return(40.0);
-      return(100.0);
-     }
-
-   //--- RR 5%: reward the planned risk:reward of this specific setup
-   double            ScoreRR(const SScoreContext &ctx)
-     {
-      if(ctx.plannedRR >= 2.5) return(100.0);
-      if(ctx.plannedRR >= 2.0) return(80.0);
-      if(ctx.plannedRR >= 1.5) return(50.0);
-      return(0.0);
-     }
-
-   //--- Spread 5%: tighter spread = better execution quality
-   double            ScoreSpread(const SScoreContext &ctx)
-     {
-      if(ctx.maxSpreadPoints <= 0.0) return(50.0);
-      double ratio = ctx.spreadPoints / ctx.maxSpreadPoints;
-      if(ratio <= 0.4) return(100.0);
-      if(ratio <= 0.7) return(70.0);
-      if(ratio <= 1.0) return(40.0);
-      return(0.0);
-     }
-
-   //--- Session 5%: London/NY overlap is the highest-quality window
-   double            ScoreSession(const SScoreContext &ctx)
-     {
-      if(ctx.session == "Overlap")  return(100.0);
-      if(ctx.session == "London")   return(80.0);
-      if(ctx.session == "NewYork")  return(80.0);
-      if(ctx.session == "Asian")    return(40.0);
-      return(0.0);
      }
 
    //--- full evaluation: fills `sig` with direction, scores and reason
-   void              Evaluate(CIndicatorSet &h4, CIndicatorSet &h1, CIndicatorSet &m30,
-                              CIndicatorSet &m15, CIndicatorSet &entry,
-                              const SStructureInfo &st, const SRegimeInfo &regime,
+   void              Evaluate(const int dir,
+                              const SStructureInfo &d1, const SStructureInfo &h4,
+                              const SStructureInfo &h1, const SStructureInfo &entrySt,
+                              CIndicatorSet &entry, CIndicatorSet &indH1,
                               const SScoreContext &ctx, SSignal &sig)
      {
-      sig.direction = 0;   sig.total = 0.0;
-      sig.trendScore = 0.0; sig.structureScore = 0.0; sig.momentumScore = 0.0;
-      sig.volumeScore = 0.0; sig.liquidityScore = 0.0; sig.volatilityScore = 0.0;
-      sig.newsScore = 0.0; sig.rrScore = 0.0; sig.spreadScore = 0.0; sig.sessionScore = 0.0;
+      sig.direction = dir;  sig.total = 0.0;
+      sig.structureScore = 0.0; sig.liquidityScore = 0.0; sig.bosChochScore = 0.0;
+      sig.obScore = 0.0; sig.fvgScore = 0.0; sig.volumeScore = 0.0;
+      sig.indicatorScore = 0.0;
       sig.reason = "";
-
-      int dir = DecideDirection(h4, h1, m15);
       if(dir == 0)
         {
-         sig.reason = "No direction / HTF conflict";
+         sig.reason = "Structure gives no direction / HTF conflict";
          return;
         }
 
-      sig.direction       = dir;
-      sig.trendScore      = ScoreTrend(dir, h4, h1, m15, entry);
-      sig.structureScore  = ScoreStructure(dir, st, entry);
-      sig.momentumScore   = ScoreMomentum(dir, entry, h1);
-      sig.volumeScore     = ScoreVolume(dir, entry);
-      sig.liquidityScore  = ScoreLiquidity(dir, ctx.smc);
-      sig.volatilityScore = ScoreVolatility(regime, entry, dir);
-      sig.newsScore       = ScoreNews(ctx);
-      sig.rrScore         = ScoreRR(ctx);
-      sig.spreadScore     = ScoreSpread(ctx);
-      sig.sessionScore    = ScoreSession(ctx);
+      sig.structureScore = ScoreStructure(dir, d1, h4, h1, entrySt);
+      sig.liquidityScore = ScoreLiquidity(dir, ctx.smc);
+      sig.bosChochScore  = ScoreBosChoch(dir, entrySt);
+      sig.obScore        = ScoreOrderBlock(dir, ctx.smc);
+      sig.fvgScore       = ScoreFVG(dir, ctx.smc);
+      sig.volumeScore    = ScoreVolume(dir, entry);
+      sig.indicatorScore = ScoreIndicator(dir, entry, indH1);
 
-      sig.total = sig.trendScore      * m_wTrend
-                + sig.structureScore  * m_wStructure
-                + sig.momentumScore   * m_wMomentum
-                + sig.volumeScore     * m_wVolume
-                + sig.liquidityScore  * m_wLiquidity
-                + sig.volatilityScore * m_wVolatility
-                + sig.newsScore       * m_wNews
-                + sig.rrScore         * m_wRR
-                + sig.spreadScore     * m_wSpread
-                + sig.sessionScore    * m_wSession;
+      sig.total = sig.structureScore * m_wStructure
+                + sig.liquidityScore * m_wLiquidity
+                + sig.bosChochScore  * m_wBosChoch
+                + sig.obScore        * m_wOB
+                + sig.fvgScore       * m_wFVG
+                + sig.volumeScore    * m_wVolume
+                + sig.indicatorScore * m_wIndicator;
 
       sig.reason = StringFormat(
-         "%s | Tr %.0f St %.0f Mo %.0f Vo %.0f Liq %.0f Vola %.0f News %.0f RR %.0f Spr %.0f Ses %.0f | %s %s | %s",
+         "%s | Struct %.0f Liq %.0f BOS %.0f OB %.0f FVG %.0f Vol %.0f Ind %.0f | rangePos %.2f RR %.1f | %s",
          dir > 0 ? "BUY" : "SELL",
-         sig.trendScore, sig.structureScore, sig.momentumScore, sig.volumeScore,
-         sig.liquidityScore, sig.volatilityScore, sig.newsScore, sig.rrScore,
-         sig.spreadScore, sig.sessionScore,
-         CRegimeDetector::RegimeName(regime.regime),
-         CRegimeDetector::VolName(regime.vol),
-         ctx.session);
+         sig.structureScore, sig.liquidityScore, sig.bosChochScore,
+         sig.obScore, sig.fvgScore, sig.volumeScore, sig.indicatorScore,
+         ctx.smc.rangePos, ctx.plannedRR, ctx.session);
      }
   };
 

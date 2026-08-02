@@ -9,6 +9,14 @@
 #ifndef CG_MARKET_STRUCTURE_MQH
 #define CG_MARKET_STRUCTURE_MQH
 
+//--- trend classification from the HH/HL vs LH/LL swing pattern
+enum ENUM_MS_TREND
+  {
+   MS_UPTREND,       // Higher Highs + Higher Lows
+   MS_DOWNTREND,     // Lower Highs + Lower Lows
+   MS_SIDEWAYS       // Mixed / unclear structure
+  };
+
 //--- result of one structure scan
 struct SStructureInfo
   {
@@ -17,8 +25,9 @@ struct SStructureInfo
    double            prevSwingHigh;    // the one before it
    double            prevSwingLow;
    int               bias;             // +1 bullish, -1 bearish, 0 unclear
+   ENUM_MS_TREND     trend;            // HH/HL vs LH/LL classification
    bool              recentBOS;        // structure break in recent bars
-   bool              recentCHoCH;      // direction flip in recent bars
+   bool              recentCHoCH;      // direction flip in recent bars (MSS)
   };
 
 //+------------------------------------------------------------------+
@@ -73,6 +82,7 @@ public:
       info.prevSwingHigh = 0.0;
       info.prevSwingLow  = 0.0;
       info.bias          = 0;
+      info.trend         = MS_SIDEWAYS;
       info.recentBOS     = false;
       info.recentCHoCH   = false;
 
@@ -135,13 +145,18 @@ public:
          if(bosDir != 0) break;
         }
 
-      //--- fallback bias: higher-highs/higher-lows pattern
+      //--- HH/HL vs LH/LL trend classification (independent of BOS)
+      bool hhhl = (info.lastSwingHigh > info.prevSwingHigh && info.lastSwingLow > info.prevSwingLow);
+      bool lllh = (info.lastSwingHigh < info.prevSwingHigh && info.lastSwingLow < info.prevSwingLow);
+      if(hhhl)      info.trend = MS_UPTREND;
+      else if(lllh) info.trend = MS_DOWNTREND;
+      else          info.trend = MS_SIDEWAYS;
+
+      //--- bias: latest structure break wins, else the swing pattern
       if(bosDir != 0)
          info.bias = bosDir;
       else
         {
-         bool hhhl = (info.lastSwingHigh > info.prevSwingHigh && info.lastSwingLow > info.prevSwingLow);
-         bool lllh = (info.lastSwingHigh < info.prevSwingHigh && info.lastSwingLow < info.prevSwingLow);
          if(hhhl) info.bias = 1;
          if(lllh) info.bias = -1;
         }

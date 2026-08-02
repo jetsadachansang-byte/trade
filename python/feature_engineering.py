@@ -72,9 +72,8 @@ def add_features(trades: pd.DataFrame) -> pd.DataFrame:
 
 
 FEATURE_COLUMNS = [
-    "score", "score_trend", "score_structure", "score_momentum",
-    "score_volume", "score_liquidity", "score_volatility",
-    "score_news", "score_rr", "score_spread", "score_session",
+    "score", "score_structure", "score_liquidity", "score_bos_choch",
+    "score_orderblock", "score_fvg", "score_volume", "score_indicator",
     "planned_rr", "hour", "weekday", "is_buy", "sl_dist", "tp_dist",
     "regime_trend", "regime_highvol", "session_london", "session_ny",
 ]

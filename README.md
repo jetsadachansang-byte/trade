@@ -1,7 +1,7 @@
-# CapitalGuard v2 — ระบบเทรดอัตโนมัติแบบ Capital Preservation First
+# CapitalGuard v3 — ระบบเทรด SMC-First แบบ Capital Preservation
 
-ระบบเทรด MT5 สำหรับโบรกเกอร์ XM (XAUUSD เป็นหลัก) ที่ทำงานเสมือนระบบเทรดของกองทุน:
-**วิเคราะห์ตลาดทุก tick ตลอดเวลา แต่เปิดออเดอร์เฉพาะ setup คุณภาพสูงสุดเท่านั้น**
+ระบบเทรด MT5 สำหรับโบรกเกอร์ XM (XAUUSD เป็นหลัก) ที่ใช้ **Smart Money Concepts (SMC) เป็นระบบตัดสินใจหลัก**
+อินดิเคเตอร์**ห้าม**เป็นเหตุผลในการเปิดออเดอร์ — มีหน้าที่ยืนยันความน่าจะเป็นเท่านั้น (weight 5%)
 "การไม่เทรด" คือการตัดสินใจที่ถูกต้อง — วันที่ไม่มีออเดอร์เลยคือวันปกติ
 
 **กฎเหล็ก:** ไม่มี Martingale / ไม่มี Grid / ไม่เฉลี่ยขาดทุน / ไม่ย้าย SL ออกห่าง / ทุกออเดอร์ต้องมี SL และ TP / ถึง Daily Loss หยุดเทรดทันที
@@ -57,39 +57,47 @@ XAUUSD ที่ lot ขั้นต่ำ 0.01 การขาดทุน 1 �
 
 คำแนะนำจริงใจ: ทุน $30 เหมาะกับการ**พิสูจน์ระบบ** มากกว่าสร้างรายได้ — ใช้บัญชี Cent หรือเดโม่จนกว่าสถิติจะพิสูจน์ตัวเองผ่าน Backtest + Forward Test แล้วค่อยเพิ่มทุน
 
-## AI Decision Engine (คะแนน 0–100, เกณฑ์ > 90)
+## ลำดับการวิเคราะห์ SMC (Sequential Pipeline — ข้อใดไม่ผ่าน ห้ามเข้า)
 
-เปิดออเดอร์เฉพาะเมื่อคะแนนรวม **> 90** โดย 10 หมวดมีน้ำหนัก:
+1. **Market Structure** — HH/HL/LH/LL บน D1, H4, H1, entry TF → ทิศทางมาจากโครงสร้างเท่านั้น (H4+H1 ต้องตรงกัน, D1 ห้ามสวน) ห้ามสวนเทรนด์ TF หลัก เว้นแต่เปิด `InpAllowCounterTrend` และมี CHoCH ชัดเจนบน H1
+2. **Liquidity** — แผนที่สภาพคล่อง: Equal Highs/Lows, BSL/SSL pools
+3. **BOS** — Break of Structure ในทิศทางเทรด
+4. **CHoCH / MSS** — Change of Character (นับรวมกับข้อ 3: ต้องมีอย่างใดอย่างหนึ่ง)
+5. **Order Block** — โซนที่ผ่านการให้คะแนนคุณภาพ ≥ 60 (ความสด, จำนวนครั้งที่ถูกแตะ, volume, ตำแหน่งในโครงสร้าง, ความสัมพันธ์กับ sweep)
+6. **Fair Value Gap** — มี FVG ในทิศทางเทรดที่ยังไม่ถูก invalidate
+7. **Liquidity Sweep** — ต้องเกิดการกวาดสภาพคล่องก่อนเสมอ จึงพิจารณาเข้า
+8. **Premium/Discount** — Buy เฉพาะ Discount (≤0.5 ของ dealing range), Sell เฉพาะ Premium
+9. **Mitigation** — ราคาต้องกลับมา mitigate OB หรือ FVG จริง ๆ (ไม่ไล่ราคา)
+10. **Entry Confirmation** — TF ล่าง (M30/M15) ห้ามสวนทิศ + คะแนนรวม ≥ 90
+11. **Risk Management** — RR ≥ 1:2, position sizing, margin
+
+## Confidence Score (SMC เป็นหลัก, เกณฑ์ ≥ 90)
 
 | หมวด | น้ำหนัก | สิ่งที่วัด |
 |---|---|---|
-| Trend | 20% | EMA stack H4/H1/M15, VWAP, Ichimoku cloud (H1), SuperTrend |
-| Market Structure | 20% | Bias จาก Swing, BOS, CHoCH, Fibonacci golden zone (38.2–61.8%) |
-| Momentum | 15% | RSI zone+slope, MACD (entry+H1), +DI/−DI, Tenkan/Kijun |
-| Volume | 10% | ปริมาณเทียบค่าเฉลี่ย, OBV slope, CMF |
-| Liquidity (SMC) | 10% | Liquidity Sweep, Order Block retest, Fair Value Gap |
-| Volatility | 10% | ATR regime, ตำแหน่งใน Bollinger, ATR band |
-| News | 10% | ไม่มีข่าว = เต็ม, ข่าวใกล้เข้ามาใน 2 ชม. = ลดคะแนน |
-| Risk:Reward | 5% | RR ของ setup จริง (≥2.5 เต็ม) |
-| Spread | 5% | สเปรดขณะนั้นเทียบลิมิต |
-| Session | 5% | London/NY overlap ดีสุด |
+| Market Structure | 25% | ทุก TF (D1/H4/H1/entry) สนับสนุนทิศทาง |
+| Liquidity | 20% | Sweep เกิดแล้ว, pool เป้าหมายในทิศกำไร, ฝั่งถูกของ range |
+| BOS / CHoCH | 20% | Structure break ในทิศทางเทรด (สัญญาณหลัก) |
+| Order Block | 15% | คะแนนคุณภาพของโซน × สถานะ mitigation |
+| FVG | 10% | มี imbalance + ราคากลับมา mitigate |
+| Volume | 5% | Volume ratio, OBV, CMF |
+| Indicator Confirmation | 5% | EMA/VWAP/RSI/MACD — ยืนยันได้เท่านั้น ตัดสินใจไม่ได้ |
 
-### Hard Checklist — ต้องผ่าน **ทุกข้อ** (นอกเหนือจากคะแนน)
-
-✔ Trend แข็งแรง (ADX ≥ เกณฑ์) ✔ Multi-TF ตรงกัน ✔ BOS/CHoCH ✔ Liquidity Sweep ✔ Order Block ✔ FVG ✔ ATR อยู่ในเกณฑ์ ✔ Volume สนับสนุน ✔ ไม่มีข่าว ✔ Spread ต่ำ ✔ RR ≥ 1:2
-
-ทุกข้อเปิด/ปิดได้ผ่าน input (`InpReq*`) — ค่าเริ่มต้นเปิดหมดตามสเปค ทำให้ออเดอร์**หายากมากโดยตั้งใจ**
-ทุกคะแนนย่อยและไม้ที่ถูก skip ถูกบันทึกลง log พร้อมเหตุผล — ตรวจสอบย้อนหลังได้ทุกไม้
+ทุกคะแนนย่อย, step ที่ fail และเหตุผล ถูกบันทึกลง log — audit ย้อนหลังได้ทุกการตัดสินใจ
 
 ## Multi-Timeframe Analysis
 
-วิเคราะห์ H4, H1, M30, M15 พร้อมกัน เข้าออเดอร์ที่ **M5** (หรือ M1 ผ่าน `InpEntryTF`) — **กฎเด็ดขาด: ถ้า H4 กับ H1 สวนทางกัน ไม่เข้าเทรด**
+วิเคราะห์ **Daily, H4, H1, M30, M15** พร้อมกัน เข้าออเดอร์ที่ **M5** (หรือ M1 ผ่าน `InpEntryTF`)
+โครงสร้าง D1/H4/H1 กำหนดทิศทาง — **H4 กับ H1 ต้องตรงกัน และ D1 ห้ามสวน** ส่วน M30/M15 ห้ามขัดทิศทางตอนยืนยันเข้า
 
-## Smart Money Concepts
+## Smart Money Concepts (ระบบหลัก)
 
-- **Liquidity Sweep** — ไส้เทียนกวาด stop ใต้/เหนือ swing แล้วปิดกลับเข้ามา
-- **Order Block** — แท่งสวนทางสุดท้ายก่อน impulsive move และราคากำลัง retest โซน
-- **Fair Value Gap** — ช่องว่าง 3 แท่ง (imbalance) ที่ยังไม่ถูกปิด และราคายังเคารพโซน
+- **Liquidity Map** — Equal Highs/Lows = pool ของ stop (BSL/SSL), ตรวจว่ามี pool เป้าหมายในทิศกำไร
+- **Liquidity Sweep** — ไส้เทียนกวาด stop ใต้/เหนือ swing แล้วปิดกลับ — ต้องเกิดก่อนเข้าเสมอ
+- **Order Block คุณภาพสูง** — ให้คะแนน 5 ด้าน (ด้านละ 20): ความสดของโซน / จำนวนครั้งที่ถูกแตะ / volume ของแท่ง OB / ตำแหน่ง premium-discount / เกิดหลัง sweep
+- **Fair Value Gap + Mitigation** — imbalance 3 แท่งที่ยังไม่ถูกปิด และรอราคากลับเข้าโซนก่อนเข้า
+- **Premium/Discount** — dealing range จาก swing ล่าสุด, จุดสมดุล 0.5 — buy ต่ำกว่า, sell สูงกว่า
+- **Emergency Exit** — เกิด CHoCH สวนทางไม้ที่ถือ → ปิดทันทีไม่รอ SL
 
 ## SL / TP
 

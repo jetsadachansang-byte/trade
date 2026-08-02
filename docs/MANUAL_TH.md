@@ -1,4 +1,4 @@
-# คู่มือการติดตั้งและใช้งาน CapitalGuard EA v2 (ฉบับละเอียด)
+# คู่มือการติดตั้งและใช้งาน CapitalGuard EA v3 — SMC-First (ฉบับละเอียด)
 
 สำหรับโบรกเกอร์ XM / MetaTrader 5 / XAUUSD — ทุนเริ่มต้น $30
 
@@ -39,14 +39,22 @@ Dashboard จะปรากฏมุมซ้ายบนของกราฟ�
 | `InpMaxTradesPerDay` | 2 | จำกัดจำนวนไม้ต่อวัน |
 | `InpHardRiskCap` | 3.0 | เพดานความเสี่ยงจริงเมื่อจำเป็นต้องใช้ lot ขั้นต่ำ |
 
-### เกณฑ์การเข้า
+### เกณฑ์การเข้า (SMC Pipeline)
 | Input | ค่าเริ่มต้น | คำอธิบาย |
 |---|---|---|
 | `InpScoreThreshold` | 90 | คะแนนขั้นต่ำ — ต่ำกว่านี้ไม่เข้าเด็ดขาด |
-| `InpReqStrongTrend` … `InpReqVolume` | true ทั้งหมด | Hard checklist 7 ข้อ ต้องผ่านทุกข้อ |
+| `InpReqBosChoch` | true | ต้องมี BOS/CHoCH ในทิศทางเทรด |
+| `InpReqOrderBlock` / `InpMinOBQuality` | true / 60 | ต้องมี OB คุณภาพ ≥ 60 |
+| `InpReqFVG` | true | ต้องมี Fair Value Gap |
+| `InpReqSweep` | true | ต้องเกิด Liquidity Sweep ก่อน |
+| `InpReqPremiumDiscount` / `InpDiscountMax` | true / 0.5 | Buy เฉพาะ discount, Sell เฉพาะ premium |
+| `InpReqMitigation` | true | ราคาต้องกลับมา mitigate OB/FVG ก่อนเข้า |
+| `InpReqTrendConfirm` | true | M30/M15 ห้ามสวนทิศทาง |
+| `InpAllowCounterTrend` | false | อนุญาตสวนเทรนด์เมื่อมี CHoCH ชัดเจนบน H1 |
+| `InpReqLiquidityTarget` | false | บังคับให้มี BSL/SSL pool ในทิศกำไร (เข้มพิเศษ) |
 | `InpMinRR` | 2.0 | Risk:Reward ขั้นต่ำ 1:2 |
 
-> ⚠️ **ค่าเริ่มต้นเข้มงวดมากตามสเปค** (คะแนน >90 + checklist ครบทุกข้อรวมทั้ง Sweep+OB+FVG พร้อมกัน) — บางสัปดาห์อาจไม่มีออเดอร์เลย ซึ่ง**ถือว่าปกติและถูกต้อง** หาก backtest แล้วจำนวนเทรดน้อยเกินไปจนวัดสถิติไม่ได้ ให้ผ่อน checklist ทีละข้อ (เริ่มจาก `InpReqFVG=false` → `InpReqOrderBlock=false`) แล้วดูผลเทียบกัน **อย่าลดหลายข้อพร้อมกัน**
+> ⚠️ **ค่าเริ่มต้นเข้มงวดมากตามสเปค** — pipeline 11 ขั้นต้องผ่านครบ (Sweep+BOS/CHoCH+OB+FVG+Mitigation พร้อมกัน) บางสัปดาห์อาจไม่มีออเดอร์เลย ซึ่ง**ถือว่าปกติและถูกต้อง** — dashboard บรรทัด `Status:` จะบอกว่ารออยู่ที่ step ไหน หาก backtest แล้วจำนวนเทรดน้อยจนวัดสถิติไม่ได้ ให้ผ่อนทีละข้อ (แนะนำเริ่มจาก `InpReqMitigation=false` → `InpReqFVG=false`) แล้ว backtest เทียบกันทุกครั้ง **อย่าลดหลายข้อพร้อมกัน**
 
 ### เวลาเทรด (สำคัญ — ต้องปรับตามโบรกเกอร์)
 เวลาใน EA เป็น**เวลา server ของ XM** (GMT+2 หรือ GMT+3 ช่วง DST):
@@ -86,8 +94,9 @@ Dashboard จะปรากฏมุมซ้ายบนของกราฟ�
 
 1. Strategy Tester → Settings → **Optimization: Genetic** → **Forward: 1/3**
 2. พารามิเตอร์ที่ควร optimize (ทีละกลุ่ม อย่าทำพร้อมกันทั้งหมด):
+   - กลุ่ม SMC: `InpSwingBars` (2–5), `InpSmcWindow` (20–50), `InpMinOBQuality` (50–80), `InpDiscountMax` (0.4–0.6)
    - กลุ่ม SL/TP: `InpAtrMultSL` (1.0–2.5), `InpBaseRR` (1.5–3.0), `InpAtrTrailMult` (0.8–2.0)
-   - กลุ่มเกณฑ์เข้า: `InpScoreThreshold` (80–95), `InpAdxTrendMin` (20–30)
+   - กลุ่มเกณฑ์เข้า: `InpScoreThreshold` (80–95)
    - กลุ่มเวลา: ช่วง session
 3. **กติกาเลือกผล:** เลือกชุดที่กำไร/DD ในช่วง **Forward ใกล้เคียงช่วง Back** — ไม่ใช่ชุดที่ back สูงสุด ชุดที่ดีเฉพาะ back คือ overfit ให้ทิ้ง
 4. รัน Monte Carlo ซ้ำด้วย Python (ข้อ 7) เพื่อดูความเสี่ยงลำดับเทรดสลับกัน

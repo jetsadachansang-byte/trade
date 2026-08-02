@@ -1,28 +1,32 @@
 //+------------------------------------------------------------------+
 //|                                             CapitalGuardEA.mq5   |
-//|  CapitalGuard v2 - Capital Preservation First trading system     |
+//|  CapitalGuard v3 - SMC-first, Capital Preservation trading bot   |
 //|                                                                  |
-//|  Institutional-style discipline:                                 |
-//|   1. Preserve capital                                            |
-//|   2. Minimize drawdown                                           |
-//|   3. Consistent profit                                           |
-//|   4. Never overtrade - analyse every tick, trade almost never    |
-//|   5. Only the highest-probability setups (score > 90 + checklist)|
+//|  CORE STRATEGY: Smart Money Concepts (SMC).                      |
+//|  Indicators NEVER drive entries - they only confirm (5% weight). |
 //|                                                                  |
-//|  "Not trading" is a valid decision. A day with zero orders is    |
-//|  a normal day.                                                   |
+//|  Sequential analysis before every order (any step fails = wait): |
+//|   1. Market Structure (D1/H4/H1/entry, HH-HL-LH-LL)              |
+//|   2. Liquidity map (equal highs/lows, BSL/SSL pools)             |
+//|   3. BOS (Break of Structure)                                    |
+//|   4. CHoCH / MSS (Change of Character)                           |
+//|   5. Order Block (quality-scored)                                |
+//|   6. Fair Value Gap                                              |
+//|   7. Liquidity Sweep (must have occurred first)                  |
+//|   8. Premium / Discount zone (buy discount, sell premium)        |
+//|   9. Mitigation (price returning into OB / FVG)                  |
+//|  10. Entry Confirmation (confidence score >= 90)                 |
+//|  11. Risk Management (sizing, RR >= 1:2, margin)                 |
+//|                                                                  |
+//|  Waiting through long periods without a setup is CORRECT         |
+//|  behaviour, not a malfunction.                                   |
 //|                                                                  |
 //|  Hard rules: no Martingale, no Grid, no averaging down, SL is    |
 //|  never widened, every order carries SL and TP, daily loss stops  |
 //|  trading immediately.                                            |
-//|                                                                  |
-//|  Modules (MQL5/Include/CapitalGuard/):                           |
-//|   RiskManager | IndicatorSet | MarketStructure | SmartMoney |    |
-//|   Regime | NewsFilter | ScoringEngine | TradeManager | Logger |  |
-//|   Dashboard                                                      |
 //+------------------------------------------------------------------+
 #property copyright "CapitalGuard"
-#property version   "2.00"
+#property version   "3.00"
 
 #include <Trade\Trade.mqh>
 #include <CapitalGuard\RiskManager.mqh>
@@ -63,33 +67,34 @@ input ENUM_AFTER_TARGET InpAfterTarget      = AFTER_TARGET_STOP; // After target
 input ENUM_MINLOT_POLICY InpMinLotPolicy    = MINLOT_USE_IF_CAPPED; // When lot < broker minimum
 input double            InpHardRiskCap      = 3.0;              // Hard cap per trade with min lot (%)
 
-//--- Inputs: Decision engine (weights sum ~100) -------------------------
-input group             "=== Decision Engine ==="
+//--- Inputs: SMC confidence score (weights sum ~100) --------------------
+input group             "=== SMC Confidence Score ==="
 input double            InpScoreThreshold   = 90.0;             // Min confidence score (0-100)
 input double            InpQualityThreshold = 95.0;             // Score after daily target (quality mode)
-input double            InpWeightTrend      = 20.0;             // Weight: Trend
-input double            InpWeightStructure  = 20.0;             // Weight: Market structure
-input double            InpWeightMomentum   = 15.0;             // Weight: Momentum
-input double            InpWeightVolume     = 10.0;             // Weight: Volume
-input double            InpWeightLiquidity  = 10.0;             // Weight: Liquidity (SMC)
-input double            InpWeightVolatility = 10.0;             // Weight: Volatility
-input double            InpWeightNews       = 10.0;             // Weight: News filter
-input double            InpWeightRR         = 5.0;              // Weight: Risk:Reward
-input double            InpWeightSpread     = 5.0;              // Weight: Spread
-input double            InpWeightSession    = 5.0;              // Weight: Session quality
+input double            InpWeightStructure  = 25.0;             // Weight: Market Structure
+input double            InpWeightLiquidity  = 20.0;             // Weight: Liquidity
+input double            InpWeightBosChoch   = 20.0;             // Weight: BOS / CHoCH
+input double            InpWeightOB         = 15.0;             // Weight: Order Block
+input double            InpWeightFVG        = 10.0;             // Weight: Fair Value Gap
+input double            InpWeightVolume     = 5.0;              // Weight: Volume
+input double            InpWeightIndicator  = 5.0;              // Weight: Indicator confirmation
 
-//--- Inputs: Hard entry checklist (ALL must pass) -----------------------
-input group             "=== Entry Checklist ==="
-input bool              InpReqStrongTrend   = true;             // Require ADX strong trend
-input bool              InpReqBOS           = true;             // Require recent BOS or CHoCH
-input bool              InpReqSweep         = true;             // Require liquidity sweep
-input bool              InpReqOrderBlock    = true;             // Require order block retest
+//--- Inputs: SMC pipeline (sequential hard gates) -----------------------
+input group             "=== SMC Pipeline ==="
+input bool              InpAllowCounterTrend = false;           // Allow counter-trend on clear CHoCH
+input bool              InpReqLiquidityTarget = false;          // Require BSL/SSL pool in profit direction
+input bool              InpReqBosChoch      = true;             // Require BOS or CHoCH in direction
+input bool              InpReqOrderBlock    = true;             // Require quality order block
+input double            InpMinOBQuality     = 60.0;             // Min order block quality (0-100)
 input bool              InpReqFVG           = true;             // Require fair value gap
-input bool              InpReqAtrBand       = true;             // Require ATR inside healthy band
-input bool              InpReqVolume        = true;             // Require volume support (score>=50)
+input bool              InpReqSweep         = true;             // Require liquidity sweep first
+input bool              InpReqPremiumDiscount = true;           // Buy discount / sell premium only
+input double            InpDiscountMax      = 0.50;             // Discount zone = rangePos <= this
+input bool              InpReqMitigation    = true;             // Require price mitigating OB or FVG
+input bool              InpReqTrendConfirm  = true;             // Lower TFs must not oppose direction
 
-//--- Inputs: Indicators -------------------------------------------------
-input group             "=== Indicators ==="
+//--- Inputs: Indicators (confirmation only) -----------------------------
+input group             "=== Indicators (confirmation only) ==="
 input int               InpEmaFast          = 20;               // EMA fast
 input int               InpEmaMid           = 50;               // EMA mid
 input int               InpEmaSlow          = 200;              // EMA slow
@@ -98,11 +103,14 @@ input int               InpAtrPeriod        = 14;               // ATR period
 input int               InpAdxPeriod        = 14;               // ADX period
 input int               InpBBPeriod         = 20;               // Bollinger period
 input double            InpBBDev            = 2.0;              // Bollinger deviation
+
+//--- Inputs: Structure / SMC detection ----------------------------------
+input group             "=== Structure Detection ==="
 input int               InpSwingBars        = 3;                // Swing confirmation bars
 input int               InpStructLookback   = 80;               // Structure scan lookback (bars)
 input int               InpSmcWindow        = 30;               // Smart-money pattern window (bars)
 
-//--- Inputs: Regime detection -------------------------------------------
+//--- Inputs: Regime detection (RR adaptation) ---------------------------
 input group             "=== Market Regime ==="
 input double            InpAdxTrendMin      = 23.0;             // ADX >= this = trending
 input double            InpHighVolRatio     = 1.4;              // ATR ratio for high volatility
@@ -114,7 +122,7 @@ input group             "=== SL / TP ==="
 input double            InpAtrMultSL        = 1.5;              // ATR multiplier for SL fallback
 input double            InpMaxSLAtrMult     = 2.5;              // Max SL distance (x ATR)
 input double            InpMinSLAtrMult     = 0.8;              // Min SL distance (x ATR)
-input double            InpMinRR            = 2.0;              // Minimum Risk:Reward (checklist)
+input double            InpMinRR            = 2.0;              // Minimum Risk:Reward
 input double            InpBaseRR           = 2.0;              // Target Risk:Reward
 input double            InpStrongTrendRR    = 2.5;              // RR when trend is strong (ADX>=30)
 
@@ -149,7 +157,6 @@ input group             "=== News Filter ==="
 input bool              InpNewsEnabled      = true;             // Enable news filter
 input int               InpNewsPreMin       = 45;               // Hard block before news (minutes)
 input int               InpNewsPostMin      = 45;               // Hard block after news (minutes)
-input int               InpNewsSoftMin      = 120;              // Soft window: degrade score (minutes)
 input string            InpNewsCurrencies   = "USD";            // Currencies to watch (comma list)
 input string            InpNewsManualTimes  = "";               // Manual blocks "yyyy.mm.dd hh:mi;..."
 
@@ -166,8 +173,8 @@ input int               InpDashboardSecs    = 3;                // Dashboard ref
 //--- Module instances ---------------------------------------------------
 CTrade            trade;
 CRiskManager      risk;
-CIndicatorSet     indH4, indH1, indM30, indM15, indEntry;
-CMarketStructure  structure;
+CIndicatorSet     indH1, indM30, indM15, indEntry;
+CMarketStructure  structD1, structH4, structH1, structEntry;
 CSmartMoney       smartMoney;
 CRegimeDetector   regimeDetector;
 CNewsFilter       news;
@@ -177,12 +184,13 @@ CTradeLogger      logger;
 CDashboard        dashboard;
 
 //--- Runtime state ------------------------------------------------------
-datetime          g_lastBarTime   = 0;
+datetime          g_lastBarTime = 0;
 SSignal           g_lastSignal;
 SRegimeInfo       g_regime;
-SStructureInfo    g_structure;
+SStructureInfo    g_stD1, g_stH4, g_stH1, g_stEntry;
 string            g_newsStatus    = "";
 string            g_tradingStatus = "starting";
+string            g_lastSkipMsg   = "";     // avoid flooding the skip log
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
@@ -194,9 +202,8 @@ int OnInit()
    trade.SetDeviationInPoints(InpSlippagePoints);
    trade.SetTypeFillingBySymbol(_Symbol);
 
-   //--- indicator bundles for every analysed timeframe
+   //--- indicator bundles (confirmation + volume + regime + ATR)
    bool ok = true;
-   ok &= indH4.Init(_Symbol, PERIOD_H4, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
    ok &= indH1.Init(_Symbol, PERIOD_H1, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
    ok &= indM30.Init(_Symbol, PERIOD_M30, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
    ok &= indM15.Init(_Symbol, PERIOD_M15, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
@@ -207,17 +214,21 @@ int OnInit()
       return(INIT_FAILED);
      }
 
+   //--- structure scanners: SMC reads structure on every key timeframe
+   structD1.Init(_Symbol, PERIOD_D1, InpSwingBars, InpStructLookback);
+   structH4.Init(_Symbol, PERIOD_H4, InpSwingBars, InpStructLookback);
+   structH1.Init(_Symbol, PERIOD_H1, InpSwingBars, InpStructLookback);
+   structEntry.Init(_Symbol, InpEntryTF, InpSwingBars, InpStructLookback);
+
    //--- modules
    risk.Init(_Symbol, InpMagic, InpRiskPerTrade, InpMaxDailyLoss, InpMaxWeeklyLoss,
              InpMaxDrawdown, InpMaxTradesPerDay, InpDailyTargetPct,
              InpMinLotPolicy, InpHardRiskCap);
-   structure.Init(_Symbol, InpEntryTF, InpSwingBars, InpStructLookback);
    smartMoney.Init(_Symbol, InpEntryTF, InpSmcWindow);
    regimeDetector.Init(InpAdxTrendMin, InpHighVolRatio, InpLowVolRatio, InpAtrAvgBars);
    news.Init(InpNewsEnabled, InpNewsPreMin, InpNewsPostMin, InpNewsCurrencies, InpNewsManualTimes);
-   scoring.Init(InpWeightTrend, InpWeightStructure, InpWeightMomentum, InpWeightVolume,
-                InpWeightLiquidity, InpWeightVolatility, InpWeightNews, InpWeightRR,
-                InpWeightSpread, InpWeightSession);
+   scoring.Init(InpWeightStructure, InpWeightLiquidity, InpWeightBosChoch,
+                InpWeightOB, InpWeightFVG, InpWeightVolume, InpWeightIndicator);
    tradeMgr.Init(GetPointer(trade), _Symbol, InpMagic,
                  InpUseBreakEven, InpBETriggerR, InpBELockPoints,
                  InpUsePartial, InpPartialR, InpPartialPct,
@@ -244,9 +255,9 @@ int OnInit()
 
    g_lastSignal.direction = 0;
    g_lastSignal.total     = 0.0;
-   g_structure.bias       = 0;
-   g_structure.recentBOS  = false;
-   g_structure.recentCHoCH = false;
+   g_stEntry.bias         = 0;
+   g_stEntry.recentBOS    = false;
+   g_stEntry.recentCHoCH  = false;
    return(INIT_SUCCEEDED);
   }
 
@@ -255,8 +266,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   indH4.Release(); indH1.Release(); indM30.Release();
-   indM15.Release(); indEntry.Release();
+   indH1.Release(); indM30.Release(); indM15.Release(); indEntry.Release();
    dashboard.Clear();
   }
 
@@ -269,8 +279,8 @@ void OnTick()
    risk.UpdateRollover();
 
    //--- manage open positions every tick (emergency / BE / partial /
-   //--- trail / time exit) using the latest structure snapshot
-   tradeMgr.Manage(indEntry, g_structure);
+   //--- trail / time exit) using the latest entry-TF structure
+   tradeMgr.Manage(indEntry, g_stEntry);
 
    //--- refresh regime + dashboard
    regimeDetector.Detect(indH1, g_regime);
@@ -281,9 +291,11 @@ void OnTick()
    if(!IsNewBar())
       return;
 
-   //--- refresh the structure snapshot on every entry-TF bar so both
-   //--- entries and the emergency exit see current structure
-   structure.Scan(g_structure);
+   //--- refresh every structure snapshot (SMC reads structure first)
+   structD1.Scan(g_stD1);
+   structH4.Scan(g_stH4);
+   structH1.Scan(g_stH1);
+   structEntry.Scan(g_stEntry);
 
    TryEnter();
   }
@@ -343,7 +355,6 @@ int ExternalTrendDir(const string sym)
    double closes[];
    if(CopyClose(sym, PERIOD_H1, 1, 50, closes) < 50)
       return(0);
-   //--- closes ordered oldest..newest; last element = most recent
    double smaFast = 0.0, smaSlow = 0.0;
    for(int i = 30; i < 50; i++) smaFast += closes[i];
    smaFast /= 20.0;
@@ -376,8 +387,8 @@ double ComputeSLDistance(const int direction, const SStructureInfo &st, const do
       return(0.0);
 
    double buffer  = atr * 0.3;    // liquidity buffer beyond the swing
-   double slLevel = (direction > 0) ? structure.BuyStopLevel(st, buffer)
-                                    : structure.SellStopLevel(st, buffer);
+   double slLevel = (direction > 0) ? structEntry.BuyStopLevel(st, buffer)
+                                    : structEntry.SellStopLevel(st, buffer);
    double dist = 0.0;
    if(slLevel > 0.0)
       dist = (direction > 0) ? (refPrice - slLevel) : (slLevel - refPrice);
@@ -399,78 +410,54 @@ double ComputeSLDistance(const int direction, const SStructureInfo &st, const do
   }
 
 //+------------------------------------------------------------------+
-//| Hard entry checklist: EVERY enabled item must pass               |
+//| Fail one SMC pipeline step: set status + audit log               |
 //+------------------------------------------------------------------+
-bool PassChecklist(const SSignal &sig, const SStructureInfo &st,
-                   const SSmartMoney &smc, const double rr, string &fail)
+void FailStep(const int step, const string what)
   {
-   bool isBuy = (sig.direction > 0);
-   if(InpReqStrongTrend && (g_regime.adx == EMPTY_VALUE || g_regime.adx < InpAdxTrendMin))
-     { fail = "trend/ADX not strong enough"; return(false); }
-   if(InpReqBOS && !(st.recentBOS || st.recentCHoCH))
-     { fail = "no recent BOS/CHoCH"; return(false); }
-   if(InpReqSweep && !(isBuy ? smc.sweepBull : smc.sweepBear))
-     { fail = "no liquidity sweep"; return(false); }
-   if(InpReqOrderBlock && !(isBuy ? smc.obBull : smc.obBear))
-     { fail = "no order block retest"; return(false); }
-   if(InpReqFVG && !(isBuy ? smc.fvgBull : smc.fvgBear))
-     { fail = "no fair value gap"; return(false); }
-   if(InpReqAtrBand && (g_regime.atrRatio < InpLowVolRatio || g_regime.atrRatio > InpHighVolRatio))
-     { fail = "ATR outside healthy band"; return(false); }
-   if(InpReqVolume && sig.volumeScore < 50.0)
-     { fail = "volume not supportive"; return(false); }
-   if(rr < InpMinRR)
-     { fail = StringFormat("RR %.2f below minimum %.2f", rr, InpMinRR); return(false); }
-   fail = "";
-   return(true);
+   g_tradingStatus = StringFormat("SMC step %d failed: %s", step, what);
+   //--- log each distinct reason once, not on every bar
+   if(what != g_lastSkipMsg)
+     {
+      logger.LogSkip(StringFormat("smc_step_%d", step), what);
+      g_lastSkipMsg = what;
+     }
   }
 
 //+------------------------------------------------------------------+
-//| Full entry pipeline: gates -> scoring -> checklist -> execution  |
+//| Full entry pipeline: admin gates -> 11 SMC steps -> execution    |
 //+------------------------------------------------------------------+
 void TryEnter()
   {
-   //--- 1) risk gates: daily/weekly loss, drawdown, trade count
+   //--- administrative gates (risk limits / session / news / spread) ---
    string blockReason = "";
    if(!risk.TradingAllowed(blockReason))
      {
       g_tradingStatus = "BLOCKED: " + blockReason;
       return;
      }
-
-   //--- 2) session filter
    string session = CurrentSessionName();
    if(session == "")
      {
       g_tradingStatus = "outside trading sessions";
       return;
      }
-
-   //--- 3) news hard block
    if(news.IsBlocked(g_newsStatus))
      {
       g_tradingStatus = "news pause";
-      logger.LogSkip("news", g_newsStatus);
       return;
      }
    g_newsStatus = "";
-
-   //--- 4) spread gate (protect a small account from bad fills)
    long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    if(spread > InpMaxSpreadPoints)
      {
       g_tradingStatus = StringFormat("spread too high (%d pts)", (int)spread);
       return;
      }
-
-   //--- 5) exposure: never stack positions without reason
    if(CountOwnPositions() >= InpMaxPositions)
      {
       g_tradingStatus = "position already open";
       return;
      }
-
-   //--- 6) daily target logic
    double threshold = InpScoreThreshold;
    if(risk.DailyTargetReached())
      {
@@ -479,90 +466,159 @@ void TryEnter()
          g_tradingStatus = "daily target reached - done for today";
          return;
         }
-      threshold = InpQualityThreshold;   // continue only on A+ setups
+      threshold = InpQualityThreshold;
      }
 
-   //--- 7) structure must be readable
-   if(g_structure.lastSwingHigh <= 0.0 && g_structure.lastSwingLow <= 0.0)
+   //================= SMC SEQUENTIAL PIPELINE =========================
+
+   //--- STEP 1: Market Structure -------------------------------------
+   //--- direction comes from D1/H4/H1 swing structure, NOT indicators
+   int dir = scoring.DecideDirection(g_stD1, g_stH4, g_stH1);
+   //--- counter-trend exception: only on a clear H1 Change of Character
+   if(dir == 0 && InpAllowCounterTrend && g_stH1.recentCHoCH && g_stH1.bias != 0)
+      dir = g_stH1.bias;
+   if(dir == 0)
      {
-      g_tradingStatus = "structure scan failed (insufficient data)";
+      g_tradingStatus = "SMC step 1: structure unclear or HTF conflict - waiting";
       return;
      }
+   bool isBuy = (dir > 0);
 
-   //--- 8) smart-money scan on the entry timeframe
+   //--- STEP 2: Liquidity map ----------------------------------------
    double atr = indEntry.Atr(1);
-   SSmartMoney smc;
-   if(!smartMoney.Scan(g_structure, atr == EMPTY_VALUE ? 0.0 : atr, smc))
+   SSmcAnalysis smc;
+   if(!smartMoney.Scan(g_stEntry, atr == EMPTY_VALUE ? 0.0 : atr, smc))
      {
-      g_tradingStatus = "smart-money scan failed";
+      FailStep(2, "liquidity scan failed (insufficient data)");
+      return;
+     }
+   if(InpReqLiquidityTarget && !(isBuy ? smc.bslAbovePrice : smc.sslBelowPrice))
+     {
+      FailStep(2, "no liquidity pool in profit direction");
       return;
      }
 
-   //--- 9) pre-compute the setup's SL distance and planned RR so the
-   //--- scoring engine can grade the actual trade being considered
-   int preDir = scoring.DecideDirection(indH4, indH1, indM15);
-   if(preDir == 0)
+   //--- STEP 3+4: BOS / CHoCH (MSS) ----------------------------------
+   //--- a structure break in our direction is the primary signal
+   if(InpReqBosChoch)
      {
-      g_tradingStatus = "no signal: HTF conflict or no direction";
-      return;
-     }
-   double refPrice = (preDir > 0) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
-                                  : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double slDist = ComputeSLDistance(preDir, g_structure, refPrice);
-   if(slDist <= 0.0)
-     {
-      g_tradingStatus = "cannot compute SL distance";
-      return;
-     }
-   double rr = DynamicRR();
-
-   //--- 10) optional DXY correlation veto: gold moving WITH the dollar
-   //--- index trend is fighting the macro flow - stand aside
-   if(InpUseDxyFilter && InpDxySymbol != "")
-     {
-      int dxy = ExternalTrendDir(InpDxySymbol);
-      if(dxy != 0 && dxy == preDir)
+      bool broke = (g_stEntry.bias == dir && (g_stEntry.recentBOS || g_stEntry.recentCHoCH));
+      if(!broke)
         {
-         g_tradingStatus = "DXY correlation veto";
-         logger.LogSkip("correlation", "DXY trending with gold direction");
+         FailStep(3, "no BOS/CHoCH in trade direction");
          return;
         }
      }
 
-   //--- 11) build scoring context and evaluate
-   SScoreContext ctx;
-   ctx.spreadPoints    = (double)spread;
-   ctx.maxSpreadPoints = (double)InpMaxSpreadPoints;
-   ctx.session         = session;
-   ctx.newsClear       = true;                    // hard block already passed
-   string nearbyDesc   = "";
-   ctx.newsNearby      = news.NearbyEvent(InpNewsSoftMin, nearbyDesc);
-   if(ctx.newsNearby) g_newsStatus = "upcoming: " + nearbyDesc;
-   ctx.plannedRR       = rr;
-   ctx.smc             = smc;
-
-   scoring.Evaluate(indH4, indH1, indM30, indM15, indEntry, g_structure, g_regime, ctx, g_lastSignal);
-   if(g_lastSignal.direction == 0)
+   //--- STEP 5: Order Block ------------------------------------------
+   SOrderBlock ob;
+   if(isBuy) ob = smc.obBull; else ob = smc.obBear;
+   if(InpReqOrderBlock)
      {
-      g_tradingStatus = "no signal: " + g_lastSignal.reason;
+      if(!ob.valid)
+        {
+         FailStep(5, "no valid order block");
+         return;
+        }
+      if(ob.quality < InpMinOBQuality)
+        {
+         FailStep(5, StringFormat("order block quality %.0f < %.0f", ob.quality, InpMinOBQuality));
+         return;
+        }
+     }
+
+   //--- STEP 6: Fair Value Gap ---------------------------------------
+   if(InpReqFVG && !(isBuy ? smc.fvgBull : smc.fvgBear))
+     {
+      FailStep(6, "no fair value gap in trade direction");
       return;
      }
+
+   //--- STEP 7: Liquidity Sweep --------------------------------------
+   //--- smart money grabs liquidity BEFORE the move; we wait for it
+   if(InpReqSweep && !(isBuy ? smc.sweepBull : smc.sweepBear))
+     {
+      FailStep(7, "no liquidity sweep yet - waiting");
+      return;
+     }
+
+   //--- STEP 8: Premium / Discount zone ------------------------------
+   //--- buy only at discount, sell only at premium (equilibrium 0.5)
+   if(InpReqPremiumDiscount)
+     {
+      if(isBuy && smc.rangePos > InpDiscountMax)
+        {
+         FailStep(8, StringFormat("price in premium (%.2f) - no buys", smc.rangePos));
+         return;
+        }
+      if(!isBuy && smc.rangePos < 1.0 - InpDiscountMax)
+        {
+         FailStep(8, StringFormat("price in discount (%.2f) - no sells", smc.rangePos));
+         return;
+        }
+     }
+
+   //--- STEP 9: Mitigation -------------------------------------------
+   //--- entry only when price is actually returning into the zone
+   if(InpReqMitigation)
+     {
+      bool mitigating = (ob.valid && ob.mitigating) ||
+                        (isBuy ? smc.fvgBullMitigated : smc.fvgBearMitigated);
+      if(!mitigating)
+        {
+         FailStep(9, "price not mitigating OB/FVG yet - waiting");
+         return;
+        }
+     }
+
+   //--- STEP 10: Entry Confirmation ----------------------------------
+   //--- 10a) lower timeframes must not actively oppose the direction
+   if(InpReqTrendConfirm)
+     {
+      if(indM30.TrendDirection() == -dir || indM15.TrendDirection() == -dir)
+        {
+         FailStep(10, "lower timeframe opposing direction");
+         return;
+        }
+     }
+   //--- 10b) optional DXY correlation veto
+   if(InpUseDxyFilter && InpDxySymbol != "")
+     {
+      int dxy = ExternalTrendDir(InpDxySymbol);
+      if(dxy != 0 && dxy == dir)
+        {
+         FailStep(10, "DXY trending with gold direction");
+         return;
+        }
+     }
+   //--- 10c) SL/TP plan for RR + confidence scoring
+   double refPrice = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                           : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double slDist = ComputeSLDistance(dir, g_stEntry, refPrice);
+   if(slDist <= 0.0)
+     {
+      FailStep(10, "cannot compute SL distance");
+      return;
+     }
+   double rr = DynamicRR();
+
+   SScoreContext ctx;
+   ctx.smc       = smc;
+   ctx.plannedRR = rr;
+   ctx.session   = session;
+   scoring.Evaluate(dir, g_stD1, g_stH4, g_stH1, g_stEntry, indEntry, indH1, ctx, g_lastSignal);
    if(g_lastSignal.total < threshold)
      {
-      g_tradingStatus = StringFormat("waiting: score %.1f < %.1f", g_lastSignal.total, threshold);
+      g_tradingStatus = StringFormat("SMC step 10: score %.1f < %.1f - waiting", g_lastSignal.total, threshold);
       return;
      }
 
-   //--- 12) hard checklist: every enabled condition must pass
-   string fail = "";
-   if(!PassChecklist(g_lastSignal, g_structure, smc, rr, fail))
+   //--- STEP 11: Risk Management + execution -------------------------
+   if(rr < InpMinRR)
      {
-      g_tradingStatus = "checklist failed: " + fail;
-      logger.LogSkip("checklist", fail);
+      FailStep(11, StringFormat("RR %.2f below minimum %.2f", rr, InpMinRR));
       return;
      }
-
-   //--- 13) execute with the pre-computed SL/TP plan
    OpenTrade(g_lastSignal, slDist, rr, session);
   }
 
