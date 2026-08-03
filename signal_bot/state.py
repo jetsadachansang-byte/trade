@@ -61,6 +61,7 @@ class State:
     """Everything that must survive between runs."""
     signals: list[Signal] = field(default_factory=list)
     last_signal_at: str = ""           # ISO-8601 UTC, "" when none yet
+    last_briefing_at: str = ""         # ISO-8601 UTC of the last chart briefing
 
     # --- persistence -------------------------------------------------
     @classmethod
@@ -72,7 +73,8 @@ class State:
         except (json.JSONDecodeError, OSError):
             return cls()
         signals = [Signal(**item) for item in raw.get("signals", [])]
-        return cls(signals=signals, last_signal_at=raw.get("last_signal_at", ""))
+        return cls(signals=signals, last_signal_at=raw.get("last_signal_at", ""),
+                   last_briefing_at=raw.get("last_briefing_at", ""))
 
     def save(self, path: Path = STATE_FILE) -> None:
         # keep the file small: drop finished signals older than 30 days
@@ -82,6 +84,7 @@ class State:
         payload = {
             "updated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "last_signal_at": self.last_signal_at,
+            "last_briefing_at": self.last_briefing_at,
             "signals": [asdict(s) for s in keep],
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
@@ -114,6 +117,12 @@ class State:
         if not self.last_signal_at:
             return float("inf")
         delta = now - datetime.fromisoformat(self.last_signal_at)
+        return delta.total_seconds() / 60.0
+
+    def minutes_since_briefing(self, now: datetime) -> float:
+        if not self.last_briefing_at:
+            return float("inf")
+        delta = now - datetime.fromisoformat(self.last_briefing_at)
         return delta.total_seconds() / 60.0
 
     def next_id(self, now: datetime) -> int:

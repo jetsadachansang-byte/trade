@@ -102,9 +102,13 @@ class Hold:
 
 
 def scan(state: State, tg: notifier.Telegram, cfg: Settings,
-         now: datetime) -> tuple[list, list[str]]:
-    """Analyse the universe; issue at most one signal. Returns (rejections, errors)."""
-    rejections, errors = [], []
+         now: datetime) -> tuple[list, list[str], list]:
+    """Analyse the universe and issue any qualifying signals.
+
+    Returns (rejections, errors, views) - views always covers every
+    symbol that loaded, so the briefing can report on all of them.
+    """
+    rejections, errors, views = [], [], []
 
     cap_reached = (cfg.max_signals_per_day > 0
                    and state.issued_today(now) >= cfg.max_signals_per_day)
@@ -121,7 +125,8 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
             errors.append(str(exc))
             continue
 
-        cand, rejection = analyse(symbol, tier, frames, cfg)
+        cand, rejection, view = analyse(symbol, tier, frames, cfg)
+        views.append(view)
         if rejection:
             rejections.append(rejection)
             continue
@@ -151,7 +156,7 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
         print(f"SIGNAL {symbol} {cand.side} score {cand.score}")
         sent += 1
 
-    return rejections, errors
+    return rejections, errors, views
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -160,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="print messages instead of sending to Telegram")
     parser.add_argument("--status", action="store_true",
                         help="always send the status report this run")
+    parser.add_argument("--brief", action="store_true",
+                        help="always send the chart briefing this run")
     parser.add_argument("--ignore-hours", action="store_true",
                         help="skip market-hours and kill-zone checks (for testing)")
     args = parser.parse_args(argv)
@@ -182,13 +189,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("market closed - tracking skipped")
 
-    rejections, errors = [], []
+    rejections, errors, views = [], [], []
     if not (market_open(now) or args.ignore_hours):
         print("market closed - no scan")
     elif not (in_kill_zone(cfg, now) or args.ignore_hours):
         print(f"outside kill zones (UTC hour {now.hour}) - no scan")
     else:
-        rejections, errors = scan(state, tg, cfg, now)
+        rejections, errors, views = scan(state, tg, cfg, now)
+
+    # --- chart briefing: the running commentary on the market ---------
+    due = (cfg.briefing_minutes > 0
+           and state.minutes_since_briefing(now) >= cfg.briefing_minutes)
+    if views and (due or args.brief):
+        tg.send(notifier.format_briefing(
+            views, len(state.live()), state.issued_today(now)))
+        state.last_briefing_at = now.isoformat(timespec="seconds")
+        print(f"briefing sent for {len(views)} symbol(s)")
 
     state.save()
 
