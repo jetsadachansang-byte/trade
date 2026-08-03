@@ -73,8 +73,10 @@ class Settings:
 
     # --- signal quality ------------------------------------------------
     score_threshold: float = field(default_factory=lambda: _env_float("SCORE_THRESHOLD", 90.0))
-    max_signals_per_day: int = field(default_factory=lambda: _env_int("MAX_SIGNALS_PER_DAY", 3))
-    cooldown_minutes: int = field(default_factory=lambda: _env_int("COOLDOWN_MINUTES", 60))
+    # 0 = ไม่จำกัด (ทั้งต่อวันและต่อรอบสแกน)
+    max_signals_per_day: int = field(default_factory=lambda: _env_int("MAX_SIGNALS_PER_DAY", 0))
+    max_signals_per_run: int = field(default_factory=lambda: _env_int("MAX_SIGNALS_PER_RUN", 0))
+    cooldown_minutes: int = field(default_factory=lambda: _env_int("COOLDOWN_MINUTES", 0))
     signal_expiry_hours: int = field(default_factory=lambda: _env_int("SIGNAL_EXPIRY_HOURS", 12))
 
     # --- SMC pipeline gates --------------------------------------------
@@ -106,7 +108,7 @@ class Settings:
     tp3_r: float = field(default_factory=lambda: _env_float("TP3_R", 3.0))
 
     # --- sessions / kill zones (UTC hours) --------------------------------
-    use_kill_zones: bool = field(default_factory=lambda: _env_bool("USE_KILL_ZONES", True))
+    use_kill_zones: bool = field(default_factory=lambda: _env_bool("USE_KILL_ZONES", False))
     london_kz: tuple[int, int] = field(
         default_factory=lambda: (_env_int("LONDON_KZ_START", 7), _env_int("LONDON_KZ_END", 10)))
     ny_kz: tuple[int, int] = field(
