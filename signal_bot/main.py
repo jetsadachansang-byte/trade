@@ -285,7 +285,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # tracking runs even outside kill zones - an open signal must be
     # followed to its conclusion whatever the hour
-    cache = market_data.Cache(cfg.twelvedata_key, cfg.request_pause)
+    cache = market_data.Cache(cfg.twelvedata_key, cfg.request_pause,
+                              cfg.allow_gold_futures)
     if market_open(now) or args.ignore_hours:
         track_open_signals(state, tg, cfg, now, cache)
     else:
@@ -342,6 +343,8 @@ def main(argv: list[str] | None = None) -> int:
 
     for err in errors:
         print(f"data: {err}")
+    if cache.sources:
+        print(f"price source: {cache.source_report()}")
     gold_today = state.issued_today(now, symbols=set(cfg.gold_symbols))
     pair_today = state.issued_today(now, exclude=set(cfg.gold_symbols))
     print(f"done: {len(state.live())} live signal(s), "

@@ -38,10 +38,10 @@ TWELVEDATA_SYMBOLS = {
 # on every timeframe, which silently killed gold entirely - so the loader
 # walks the list instead of betting on one spelling.
 YAHOO_SYMBOLS = {
-    # spot gold first: the COMEX future carries a basis of several dollars
-    # against spot, which showed up as "prices look wrong". The future is
-    # kept only as a last resort, and its use is disclosed in the message.
-    "XAUUSD": ("XAUUSD=X", "XAU=X", "GC=F"),
+    # Gold is spot only. The COMEX future carries a basis of several
+    # dollars against spot, which is exactly the "prices look wrong"
+    # mismatch reported earlier, so it is not in this list.
+    "XAUUSD": ("XAUUSD=X", "XAU=X"),
     "EURUSD": ("EURUSD=X",), "GBPUSD": ("GBPUSD=X",), "USDJPY": ("USDJPY=X",),
     "USDCHF": ("USDCHF=X",), "AUDUSD": ("AUDUSD=X",), "NZDUSD": ("NZDUSD=X",),
     "USDCAD": ("USDCAD=X",),
@@ -49,8 +49,13 @@ YAHOO_SYMBOLS = {
     "AUDJPY": ("AUDJPY=X",), "CADJPY": ("CADJPY=X",), "CHFJPY": ("CHFJPY=X",),
 }
 
-# Yahoo tickers whose prices are not the spot market. Falling back to one
-# beats having no data at all, but it must never pass unannounced.
+# Non-spot stand-ins, tried only when explicitly enabled
+# (ALLOW_GOLD_FUTURES). Off by default: no data is better than data from a
+# different market presented as if it were the board.
+PROXY_FALLBACKS = {"XAUUSD": ("GC=F",)}
+
+# Tickers whose prices are not the spot market. If one is ever used, the
+# fact travels with the frame and is stated in every message.
 PROXY_SYMBOLS = {"GC=F": "ราคา COMEX futures ไม่ใช่ spot — อาจต่างจากกระดาน 2-10 จุด"}
 
 # --- timeframe translation --------------------------------------------
@@ -147,14 +152,20 @@ def _yahoo_one(yf_symbol: str, symbol: str, timeframe: str) -> pd.DataFrame:
     return df
 
 
-def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
+def _from_yahoo(symbol: str, timeframe: str,
+                allow_proxy: bool = False) -> pd.DataFrame:
     """Load OHLC from Yahoo Finance's chart endpoint (no API key).
 
     Tries each mapped ticker in preference order and returns the first that
     yields enough bars, tagging the frame with the ticker that supplied it
     so a non-spot fallback can be disclosed downstream.
+
+    Non-spot stand-ins are only tried when `allow_proxy` is set; otherwise
+    a symbol whose spot tickers all fail simply has no data this run.
     """
-    candidates = YAHOO_SYMBOLS.get(symbol)
+    candidates = tuple(YAHOO_SYMBOLS.get(symbol, ()))
+    if allow_proxy:
+        candidates += tuple(PROXY_FALLBACKS.get(symbol, ()))
     if not candidates:
         raise DataError(f"{symbol}: not mapped for Yahoo Finance")
 
@@ -175,7 +186,8 @@ def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
     raise DataError(f"{symbol} {timeframe}: " + "; ".join(errors))
 
 
-def load(symbol: str, timeframe: str, api_key: Optional[str] = None) -> pd.DataFrame:
+def load(symbol: str, timeframe: str, api_key: Optional[str] = None,
+         allow_proxy: bool = False) -> pd.DataFrame:
     """Load one symbol/timeframe, preferring Twelve Data when a key exists.
 
     Falls back to Yahoo Finance on any failure so a single flaky provider
@@ -188,13 +200,16 @@ def load(symbol: str, timeframe: str, api_key: Optional[str] = None) -> pd.DataF
         try:
             df = _from_twelvedata(symbol, timeframe, api_key)
             if len(df) >= MIN_BARS:
+                # Twelve Data's XAU/USD is spot, so no disclosure needed
+                df.attrs["yahoo_symbol"] = TWELVEDATA_SYMBOLS.get(symbol, symbol)
+                df.attrs["proxy_note"] = ""
                 return df
             errors.append(f"twelvedata returned only {len(df)} bars")
         except Exception as exc:            # noqa: BLE001 - provider fallback
             errors.append(f"twelvedata: {exc}")
 
     try:
-        df = _from_yahoo(symbol, timeframe)
+        df = _from_yahoo(symbol, timeframe, allow_proxy)
         if len(df) >= MIN_BARS:
             return df
         errors.append(f"yahoo returned only {len(df)} bars")
@@ -211,11 +226,14 @@ class Cache:
     a single scan would re-download the same candles several times.
     """
 
-    def __init__(self, api_key: Optional[str] = None, pause: float = 0.0):
+    def __init__(self, api_key: Optional[str] = None, pause: float = 0.0,
+                 allow_proxy: bool = False):
         self.api_key = api_key
         self.pause = pause
+        self.allow_proxy = allow_proxy
         self._store: dict[tuple[str, str], pd.DataFrame] = {}
         self._errors: dict[tuple[str, str], str] = {}
+        self.sources: dict[str, str] = {}       # symbol -> ticker actually used
 
     def get(self, symbol: str, timeframe: str) -> pd.DataFrame:
         key = (symbol, timeframe)
@@ -224,10 +242,15 @@ class Cache:
         if key in self._errors:                 # don't retry a known failure
             raise DataError(self._errors[key])
         try:
-            df = load(symbol, timeframe, self.api_key)
+            df = load(symbol, timeframe, self.api_key, self.allow_proxy)
         except DataError as exc:
             self._errors[key] = str(exc)
             raise
+        # record which ticker served this symbol so the run log can prove
+        # whether gold came from spot or from a stand-in
+        src = df.attrs.get("yahoo_symbol", "")
+        if src and symbol not in self.sources:
+            self.sources[symbol] = src
         self._store[key] = df
         if self.pause:
             time.sleep(self.pause)
@@ -239,6 +262,13 @@ class Cache:
 
     def stats(self) -> str:
         return f"{len(self._store)} series cached, {len(self._errors)} failed"
+
+    def source_report(self) -> str:
+        """One line naming the ticker behind each symbol, proxies flagged."""
+        parts = []
+        for sym, src in sorted(self.sources.items()):
+            parts.append(f"{sym}={src}" + (" [PROXY]" if src in PROXY_SYMBOLS else ""))
+        return " ".join(parts)
 
 
 def load_multi(symbol: str, timeframes: list[str],
