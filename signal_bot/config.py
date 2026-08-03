@@ -12,7 +12,13 @@ from dataclasses import dataclass, field
 
 
 def _env_str(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+    """Read a string setting, treating an empty value as "not set".
+
+    GitHub Actions injects an empty string for any `vars.X` that has no
+    repository variable defined, so an empty value must fall back to the
+    default rather than being taken literally.
+    """
+    return os.getenv(name, "").strip() or default
 
 
 def _env_float(name: str, default: float) -> float:
