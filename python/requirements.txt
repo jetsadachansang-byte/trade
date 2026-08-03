@@ -1,0 +1,5 @@
+# CapitalGuard Signal - สถิติสัญญาณ (signal_stats.py)
+pandas>=2.0
+
+# หมายเหตุ: สคริปต์ ML/Monte Carlo เดิมย้ายไปที่ archive/python/
+# ถ้าจะใช้ ต้องติดตั้งเพิ่ม: numpy scikit-learn matplotlib
