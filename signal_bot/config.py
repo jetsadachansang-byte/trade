@@ -72,6 +72,11 @@ class Settings:
     # --- market data -------------------------------------------------
     twelvedata_key: str = field(default_factory=lambda: _env_str("TWELVEDATA_API_KEY"))
     request_pause: float = field(default_factory=lambda: _env_float("REQUEST_PAUSE", 0.0))
+    # Gold is spot only by default. Turning this on lets the loader fall
+    # back to COMEX futures when no spot ticker responds - more coverage,
+    # but the prices are a different market and will not match the board.
+    allow_gold_futures: bool = field(
+        default_factory=lambda: _env_bool("ALLOW_GOLD_FUTURES", False))
 
     # --- trading styles ----------------------------------------------
     profiles: list[str] = field(default_factory=lambda: _env_names(
