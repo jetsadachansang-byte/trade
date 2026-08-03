@@ -2,11 +2,11 @@
 //|                                              SignalManager.mqh   |
 //|  CapitalGuard - Multi-symbol signal lifecycle manager            |
 //|                                                                  |
-//|  The system does NOT trade. It issues signals (any symbol) for   |
-//|  the user to execute manually, then tracks each one against      |
-//|  that symbol's live prices:                                      |
-//|   - TP1 / TP2 / TP3 hit  -> LINE notification                    |
-//|   - Stop Loss hit        -> LINE notification                    |
+//|  The system does NOT trade. It issues signals (any symbol) to    |
+//|  Telegram for the user to execute manually, then tracks each     |
+//|  one against that symbol's live prices:                          |
+//|   - TP1 / TP2 / TP3 hit  -> Telegram notification                |
+//|   - Stop Loss hit        -> Telegram notification                |
 //|   - Setup invalidated    -> "Signal Cancelled" + reason          |
 //|                                                                  |
 //|  Every event is appended to CSV + JSONL (UTF-8) for the Python   |
@@ -15,7 +15,7 @@
 #ifndef CG_SIGNAL_MANAGER_MQH
 #define CG_SIGNAL_MANAGER_MQH
 
-#include "LineNotify.mqh"
+#include "TelegramNotify.mqh"
 #include "MarketStructure.mqh"
 #include "SymbolAnalyst.mqh"
 
@@ -56,7 +56,7 @@ class CSignalManager
   {
 private:
    SSignalRecord     m_signals[];      // session history (newest last)
-   CLineNotify      *m_line;
+   CTelegramNotify  *m_tg;
    string            m_csvFile;
    string            m_jsonFile;
    int               m_expiryHours;
@@ -116,10 +116,10 @@ private:
      }
 
 public:
-   //--- configure; `line` is the shared LINE client
-   void              Init(CLineNotify *line, const long magic, const int expiryHours)
+   //--- configure; `tg` is the shared Telegram client
+   void              Init(CTelegramNotify *tg, const long magic, const int expiryHours)
      {
-      m_line        = line;
+      m_tg          = tg;
       m_expiryHours = expiryHours;
       m_csvFile     = StringFormat("CapitalGuard\\signals_%I64d.csv", magic);
       m_jsonFile    = StringFormat("CapitalGuard\\signals_%I64d.jsonl", magic);
@@ -216,24 +216,30 @@ public:
       ArrayResize(m_signals, n + 1);
       m_signals[n] = s;
 
-      //--- LINE message in the required notification format
+      //--- Telegram message in the required notification format.
+      //--- HTML tags are safe here: dynamic parts are symbol names and
+      //--- numbers only (parse_mode=HTML is set by the client).
       int digits = (int)SymbolInfoInteger(c.symbol, SYMBOL_DIGITS);
       string msg;
-      msg  = "📊 สินทรัพย์: " + c.symbol + "\n";
-      msg += "📈 ประเภท: " + (c.dir > 0 ? "BUY" : "SELL") + "\n";
-      msg += "🎯 ราคาเข้า (Entry Zone): " + DoubleToString(c.entryLow, digits)
-           + " – " + DoubleToString(c.entryHigh, digits) + "\n";
-      msg += "🛑 Stop Loss: " + DoubleToString(c.sl, digits) + "\n";
+      msg  = "📊 <b>สินทรัพย์: " + c.symbol + "</b>\n";
+      msg += "📈 <b>ประเภท: " + (c.dir > 0 ? "BUY" : "SELL") + "</b>\n";
+      msg += "━━━━━━━━━━━━━━\n";
+      msg += "🎯 ราคาเข้า (Entry Zone): <b>" + DoubleToString(c.entryLow, digits)
+           + " – " + DoubleToString(c.entryHigh, digits) + "</b>\n";
+      msg += "🛑 Stop Loss: <b>" + DoubleToString(c.sl, digits) + "</b>\n";
       msg += "🎯 Take Profit 1: " + DoubleToString(c.tp1, digits) + "\n";
       msg += "🎯 Take Profit 2: " + DoubleToString(c.tp2, digits) + "\n";
       msg += "🎯 Take Profit 3: " + DoubleToString(c.tp3, digits) + "\n";
       msg += StringFormat("📉 Risk : Reward = 1 : %.1f\n", c.rr);
-      msg += StringFormat("⭐ Confidence Score: %.0f%%\n", c.score);
-      msg += "🧠 เหตุผลในการวิเคราะห์:\n" + c.reasons + "\n";
+      msg += StringFormat("⭐ Confidence Score: <b>%.0f%%</b>\n", c.score);
+      msg += "━━━━━━━━━━━━━━\n";
+      msg += "🧠 <b>เหตุผลในการวิเคราะห์:</b>\n" + c.reasons + "\n";
       msg += "⏰ เวลาที่วิเคราะห์: " + TimeToString(s.time, TIME_DATE|TIME_MINUTES) + " (server)\n";
-      msg += "📌 หมายเหตุ:\n" + c.notes + "\n";
-      msg += "⚠️ บริหารความเสี่ยงเอง ไม่เกิน 1% ต่อไม้ | ไม่ใช่คำแนะนำการลงทุน";
-      m_line.Push(msg);
+      msg += "📌 <b>หมายเหตุ:</b>\n" + c.notes + "\n";
+      msg += "━━━━━━━━━━━━━━\n";
+      msg += StringFormat("🆔 Signal ID: %I64d\n", s.id);
+      msg += "⚠️ <i>บริหารความเสี่ยงเอง ไม่เกิน 1% ต่อไม้ | ไม่ใช่คำแนะนำการลงทุน</i>";
+      m_tg.Push(msg);
 
       LogEvent(s, "SIGNAL", "issued");
       return(s.id);
@@ -261,9 +267,9 @@ public:
          if(slHit)
            {
             m_signals[i].status = SIG_SL;
-            m_line.Push(StringFormat("🛑 Stop Loss Hit\n%s %s @ %s\nSignal ID: %I64d",
-                                     sym, isBuy ? "BUY" : "SELL",
-                                     DoubleToString(m_signals[i].sl, digits), m_signals[i].id));
+            m_tg.Push(StringFormat("🛑 <b>Stop Loss Hit</b>\n%s %s @ <b>%s</b>\n🆔 Signal ID: %I64d",
+                                   sym, isBuy ? "BUY" : "SELL",
+                                   DoubleToString(m_signals[i].sl, digits), m_signals[i].id));
             LogEvent(m_signals[i], "SL_HIT", "");
             continue;
            }
@@ -276,9 +282,9 @@ public:
               {
                m_signals[i].tp1Hit = true;
                m_signals[i].status = SIG_TP1;
-               m_line.Push(StringFormat("✅ TP1 Hit\n%s %s @ %s\nแนะนำ: เลื่อน SL มาที่จุดเข้า (Break Even)\nSignal ID: %I64d",
-                                        sym, isBuy ? "BUY" : "SELL",
-                                        DoubleToString(m_signals[i].tp1, digits), m_signals[i].id));
+               m_tg.Push(StringFormat("✅ <b>TP1 Hit</b> (1R)\n%s %s @ <b>%s</b>\n💡 แนะนำ: ปิดบางส่วน + เลื่อน SL มาจุดเข้า (Break Even)\n🆔 Signal ID: %I64d",
+                                      sym, isBuy ? "BUY" : "SELL",
+                                      DoubleToString(m_signals[i].tp1, digits), m_signals[i].id));
                LogEvent(m_signals[i], "TP1_HIT", "");
               }
            }
@@ -289,9 +295,9 @@ public:
               {
                m_signals[i].tp2Hit = true;
                m_signals[i].status = SIG_TP2;
-               m_line.Push(StringFormat("✅ TP2 Hit\n%s %s @ %s\nSignal ID: %I64d",
-                                        sym, isBuy ? "BUY" : "SELL",
-                                        DoubleToString(m_signals[i].tp2, digits), m_signals[i].id));
+               m_tg.Push(StringFormat("✅ <b>TP2 Hit</b> (2R)\n%s %s @ <b>%s</b>\n💡 แนะนำ: ปิดเพิ่ม หรือเลื่อน SL ตามกำไร\n🆔 Signal ID: %I64d",
+                                      sym, isBuy ? "BUY" : "SELL",
+                                      DoubleToString(m_signals[i].tp2, digits), m_signals[i].id));
                LogEvent(m_signals[i], "TP2_HIT", "");
               }
            }
@@ -302,9 +308,9 @@ public:
               {
                m_signals[i].tp3Hit = true;
                m_signals[i].status = SIG_TP3;
-               m_line.Push(StringFormat("✅ TP3 Hit 🎯 สัญญาณจบสมบูรณ์\n%s %s @ %s\nSignal ID: %I64d",
-                                        sym, isBuy ? "BUY" : "SELL",
-                                        DoubleToString(m_signals[i].tp3, digits), m_signals[i].id));
+               m_tg.Push(StringFormat("🎯 <b>TP3 Hit</b> (3R) — สัญญาณจบสมบูรณ์\n%s %s @ <b>%s</b>\n🆔 Signal ID: %I64d",
+                                      sym, isBuy ? "BUY" : "SELL",
+                                      DoubleToString(m_signals[i].tp3, digits), m_signals[i].id));
                LogEvent(m_signals[i], "TP3_HIT", "completed");
                continue;
               }
@@ -315,8 +321,8 @@ public:
             TimeCurrent() - m_signals[i].time >= (long)m_expiryHours * 3600)
            {
             m_signals[i].status = SIG_CANCELLED;
-            m_line.Push(StringFormat("❌ Signal Cancelled\n%s %s\nเหตุผล: เกินเวลา %d ชม. โดยไม่ถึง TP1\nSignal ID: %I64d",
-                                     sym, isBuy ? "BUY" : "SELL", m_expiryHours, m_signals[i].id));
+            m_tg.Push(StringFormat("❌ <b>Signal Cancelled</b>\n%s %s\nเหตุผล: เกินเวลา %d ชม. โดยไม่ถึง TP1\n🆔 Signal ID: %I64d",
+                                   sym, isBuy ? "BUY" : "SELL", m_expiryHours, m_signals[i].id));
             LogEvent(m_signals[i], "CANCELLED", "expired");
            }
         }
@@ -335,8 +341,8 @@ public:
          if(st.bias == -m_signals[i].dir)
            {
             m_signals[i].status = SIG_CANCELLED;
-            m_line.Push(StringFormat("❌ Signal Cancelled\n%s %s\nเหตุผล: โครงสร้างตลาดเปลี่ยนทิศ (CHoCH สวนทาง)\nSignal ID: %I64d",
-                                     symbol, m_signals[i].dir > 0 ? "BUY" : "SELL", m_signals[i].id));
+            m_tg.Push(StringFormat("❌ <b>Signal Cancelled</b>\n%s %s\nเหตุผล: โครงสร้างตลาดเปลี่ยนทิศ (CHoCH สวนทาง)\n💡 ถ้ายังไม่เข้า = ไม่ต้องเข้าแล้ว / ถ้าเข้าแล้ว = พิจารณาปิดก่อนถึง SL\n🆔 Signal ID: %I64d",
+                                   symbol, m_signals[i].dir > 0 ? "BUY" : "SELL", m_signals[i].id));
             LogEvent(m_signals[i], "CANCELLED", "structure flipped (CHoCH)");
            }
         }

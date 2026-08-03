@@ -1,7 +1,7 @@
-# CapitalGuard Signal — ระบบ AI วิเคราะห์ตลาดและแจ้งเตือนสัญญาณเข้า LINE OA
+# CapitalGuard Signal — ระบบ AI วิเคราะห์ตลาดและแจ้งเตือนสัญญาณเข้า Telegram
 
 ระบบวิเคราะห์ตลาดด้วย **Smart Money Concepts (SMC) + ICT** ทำงานบน MetaTrader 5 ตลอดเวลาที่ตลาดเปิด
-เมื่อพบ setup คุณภาพสูง (คะแนน ≥ 90) จะ **ส่งสัญญาณเข้า LINE Official Account** ให้ผู้ใช้ตัดสินใจเปิดออเดอร์เอง
+เมื่อพบ setup คุณภาพสูง (คะแนน ≥ 90) จะ **ส่งสัญญาณแจ้งเตือนเข้า Telegram** ให้ผู้ใช้ตัดสินใจเปิดออเดอร์เอง
 
 > ⚠️ **ระบบนี้ไม่เปิดออเดอร์ใด ๆ ทั้งสิ้น** — ไม่มีโค้ดส่งคำสั่งเทรด (`CTrade`, `OrderSend`) อยู่ในระบบเลย
 > หน้าที่เดียวคือวิเคราะห์และแจ้งเตือน การเปิดออเดอร์และบริหารความเสี่ยงเป็นของผู้ใช้ทั้งหมด
@@ -18,7 +18,7 @@
 | **สินทรัพย์** | 14 ตัว จัดลำดับ 3 Tier — XAUUSD เป็นหลัก |
 | **Timeframe** | วิเคราะห์ W1, D1, H4, H1, M30, M15 พร้อมกัน — หา entry ที่ M5 (หรือ M1) |
 | **เกณฑ์ส่งสัญญาณ** | คะแนน ≥ 90/100 **และ** ผ่าน SMC pipeline ครบทุกขั้น |
-| **ช่องทางแจ้งเตือน** | LINE Official Account (Messaging API) |
+| **ช่องทางแจ้งเตือน** | Telegram (แชทส่วนตัว / กลุ่ม / channel) — ฟรีไม่จำกัดข้อความ |
 | **ติดตามผล** | แจ้ง TP1 / TP2 / TP3 / SL / ยกเลิกสัญญาณ อัตโนมัติ |
 | **Dashboard** | บนกราฟ + หน้าเว็บเปิดจากมือถือได้ |
 
@@ -76,7 +76,7 @@
 
 ---
 
-## ตัวอย่างข้อความที่ส่งเข้า LINE
+## ตัวอย่างข้อความที่ส่งเข้า Telegram
 
 ```
 📊 สินทรัพย์: XAUUSD
@@ -101,6 +101,9 @@
 • รอแท่งเทียน M5 ปิดยืนยันก่อนเข้า
 • ยกเลิกสัญญาณหากราคาปิดเลย SL ก่อนเข้าไม้
 • หลีกเลี่ยงการเข้าใกล้ช่วงประกาศข่าวสำคัญ
+━━━━━━━━━━━━━━
+🆔 Signal ID: 1785312000
+⚠️ บริหารความเสี่ยงเอง ไม่เกิน 1% ต่อไม้ | ไม่ใช่คำแนะนำการลงทุน
 ```
 
 จากนั้นระบบติดตามให้อัตโนมัติ: **✅ TP1 Hit** (แนะนำเลื่อน SL เป็น BE) → **✅ TP2** → **✅ TP3** → **🛑 Stop Loss Hit** → **❌ Signal Cancelled** (โครงสร้างเปลี่ยนทิศ หรือเกิน 12 ชม.)
@@ -133,7 +136,7 @@ MQL5/
     ├── IndicatorSet.mqh           ← อินดิเคเตอร์ (ยืนยันเท่านั้น)
     ├── Regime.mqh                 ← Trend/Range × High/Low Volatility
     ├── NewsFilter.mqh             ← ปฏิทินข่าวเศรษฐกิจ
-    ├── LineNotify.mqh             ← ส่งข้อความเข้า LINE OA
+    ├── TelegramNotify.mqh         ← ส่งข้อความเข้า Telegram (Bot API)
     └── SignalManager.mqh          ← วงจรชีวิตสัญญาณ TP1/2/3, SL, ยกเลิก
 python/
 ├── signal_stats.py                ← สถิติ รายวัน/สัปดาห์/เดือน
@@ -147,12 +150,12 @@ archive/                           ← เวอร์ชันบอทเท�
 
 ## เริ่มใช้งาน (สรุป 6 ขั้น)
 
-1. เปิด **Messaging API** ให้ LINE OA ที่ [manager.line.biz](https://manager.line.biz)
-2. เอา **Channel access token** จาก [developers.line.biz](https://developers.line.biz/console) + สแกน QR เพิ่ม OA เป็นเพื่อน
-3. MT5 → Tools → Options → Expert Advisors → **Allow WebRequest** → เพิ่ม `https://api.line.me`
+1. สร้างบอทกับ **@BotFather** ใน Telegram → พิมพ์ `/newbot` → ได้ **bot token**
+2. ทักบอทที่สร้าง (กด Start) → หา **chat id** (ใช้ `@userinfobot` หรือเปิด `InpTgShowChatId`)
+3. MT5 → Tools → Options → Expert Advisors → **Allow WebRequest** → เพิ่ม `https://api.telegram.org`
 4. คัดลอกโฟลเดอร์ `MQL5/` ลง MT5 Data Folder → Compile (F7)
 5. ตรวจชื่อ symbol จริงของโบรกเกอร์ใน Market Watch แล้วแก้ใน input
-6. ลาก EA ลง **กราฟเดียว** → ใส่ token → ต้องได้ข้อความทดสอบเข้า LINE
+6. ลาก EA ลง **กราฟเดียว** → ใส่ token + chat id → ต้องได้ข้อความทดสอบเข้า Telegram
 
 รายละเอียดทุกขั้นตอนพร้อมวิธีแก้ปัญหา: **[docs/MANUAL_TH.md](docs/MANUAL_TH.md)**
 
@@ -163,5 +166,6 @@ archive/                           ← เวอร์ชันบอทเท�
 - **ไม่รับประกันผลกำไร** — สัญญาณคือความน่าจะเป็น ไม่ใช่ความแน่นอน
 - ผู้ใช้ต้องบริหารความเสี่ยงเอง (แนะนำไม่เกิน 1% ต่อไม้)
 - Strategy Tester ใช้ WebRequest ไม่ได้ — ตอนทดสอบระบบจะพิมพ์ข้อความลง Journal แทน
+- ต้องเปิด MT5 ค้างไว้ตลอด (แนะนำ VPS) ระบบจึงจะเฝ้าตลาดต่อเนื่อง
 - ปฏิทินข่าวไม่ทำงานใน Strategy Tester (ใช้ manual list แทน)
 - ไม่ใช่คำแนะนำการลงทุน

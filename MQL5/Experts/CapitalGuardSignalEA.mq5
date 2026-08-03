@@ -1,10 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                       CapitalGuardSignalEA.mq5   |
-//|  CapitalGuard Signal v2 - Multi-symbol SMC/ICT analyst -> LINE   |
-//|                                                                  |
+//|  CapitalGuard Signal v3 - Multi-symbol SMC/ICT analyst           |
+//|                                          -> Telegram             |
 //|  This EA NEVER opens orders. It analyses a prioritised universe  |
 //|  of liquid symbols and pushes only the highest-quality setups    |
-//|  (score >= 90) to a LINE Official Account:                       |
+//|  (score >= 90) to a Telegram chat, group or channel:             |
 //|                                                                  |
 //|   Tier 1 (continuous, most resources): XAUUSD                    |
 //|   Tier 2 (every closed bar): EURUSD GBPUSD USDJPY USDCHF         |
@@ -23,12 +23,12 @@
 //|  day is normal behaviour: quality over quantity.                 |
 //+------------------------------------------------------------------+
 #property copyright "CapitalGuard"
-#property version   "2.00"
+#property version   "3.00"
 
 #include <CapitalGuard\ScoringEngine.mqh>
 #include <CapitalGuard\SymbolAnalyst.mqh>
 #include <CapitalGuard\NewsFilter.mqh>
-#include <CapitalGuard\LineNotify.mqh>
+#include <CapitalGuard\TelegramNotify.mqh>
 #include <CapitalGuard\SignalManager.mqh>
 
 //--- Inputs: General ----------------------------------------------------
@@ -45,11 +45,12 @@ input string            InpTier2Symbols     = "EURUSD,GBPUSD,USDJPY,USDCHF,AUDUS
 input string            InpTier3Symbols     = "EURJPY,GBPJPY,EURGBP,AUDJPY,CADJPY,CHFJPY";        // Tier 3: crosses
 input double            InpTier3Extra       = 2.0;              // Tier 3 threshold add-on (stricter)
 
-//--- Inputs: LINE Official Account --------------------------------------
-input group             "=== LINE OA ==="
-input bool              InpLineEnabled      = true;             // Send messages to LINE OA
-input string            InpLineToken        = "";               // Channel access token (Messaging API)
-input string            InpLineUserId       = "";               // Target userId (empty = broadcast)
+//--- Inputs: Telegram ---------------------------------------------------
+input group             "=== Telegram ==="
+input bool              InpTgEnabled        = true;             // Send messages to Telegram
+input string            InpTgBotToken       = "";               // Bot token from @BotFather
+input string            InpTgChatId         = "";               // Chat id: 123456789 / -100... / @channel
+input bool              InpTgShowChatId     = false;            // Setup helper: print chat ids to Journal
 
 //--- Inputs: Signal issuing ---------------------------------------------
 input group             "=== Signals ==="
@@ -159,7 +160,7 @@ input int               InpWebDashSecs      = 60;               // HTML dashboar
 //--- Module instances ---------------------------------------------------
 CScoringEngine    scoring;
 CNewsFilter       news;
-CLineNotify       line;
+CTelegramNotify   telegram;
 CSignalManager    signalMgr;
 CSymbolAnalyst   *g_analysts[];      // priority-ordered analyst pool
 
@@ -236,8 +237,12 @@ int OnInit()
    scoring.Init(InpWeightStructure, InpWeightLiquidity, InpWeightBosChoch,
                 InpWeightOB, InpWeightFVG, InpWeightVolume, InpWeightIndicator);
    news.Init(InpNewsEnabled, InpNewsPreMin, InpNewsPostMin, InpNewsCurrencies, InpNewsManualTimes);
-   line.Init(InpLineEnabled, InpLineToken, InpLineUserId);
-   signalMgr.Init(GetPointer(line), InpMagic, InpSignalExpiryHrs);
+   telegram.Init(InpTgEnabled, InpTgBotToken, InpTgChatId);
+   signalMgr.Init(GetPointer(telegram), InpMagic, InpSignalExpiryHrs);
+
+   //--- setup helper: dump recent chat ids so the user can find theirs
+   if(InpTgShowChatId)
+      telegram.PrintChatIds();
 
    //--- build the prioritised analyst pool (tier order = send order)
    SAnalystConfig cfg;
@@ -261,8 +266,11 @@ int OnInit()
    //--- covered even when the chart symbol is quiet)
    EventSetTimer(MathMax(5, InpScanSeconds));
 
-   line.Push(StringFormat("🤖 CapitalGuard Signal เริ่มทำงาน\nวิเคราะห์ %d สินทรัพย์ (Tier1: %s)\nส่งเฉพาะสัญญาณคะแนน >= %.0f",
-                          ArraySize(g_analysts), InpTier1Symbols, InpScoreThreshold));
+   telegram.Push(StringFormat("🤖 <b>CapitalGuard Signal เริ่มทำงาน</b>\n"
+                              "วิเคราะห์ %d สินทรัพย์ (Tier 1: %s)\n"
+                              "ส่งเฉพาะสัญญาณคะแนน >= %.0f\n"
+                              "<i>ระบบไม่เปิดออเดอร์ให้ — แจ้งเตือนอย่างเดียว</i>",
+                              ArraySize(g_analysts), InpTier1Symbols, InpScoreThreshold));
    return(INIT_SUCCEEDED);
   }
 
@@ -493,8 +501,8 @@ void DrawChartDashboard()
    text += StringFormat("  Signals today: %d | Active: %d | Win rate: %.1f%% (W%d/L%d/C%d)\n",
                         signalMgr.SignalsSince(dayStart), signalMgr.ActiveCount(),
                         winRate, wins, losses, cancelled);
-   text += StringFormat("  LINE: %s | Status: %s\n",
-                        line.FailCount() == 0 ? "OK" : StringFormat("%d fails", line.FailCount()),
+   text += StringFormat("  Telegram: %s | Status: %s\n",
+                        telegram.FailCount() == 0 ? "OK" : StringFormat("%d fails", telegram.FailCount()),
                         g_status);
    text += "---------------------------------------------------------------\n";
    for(int i = 0; i < ArraySize(g_analysts); i++)
