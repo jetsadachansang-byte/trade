@@ -68,10 +68,14 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         f"🎯 Take Profit 3: {cand.tp3}",
         f"📉 Risk : Reward = 1 : {cand.rr:.1f}",
         f"⭐ Confidence Score: <b>{cand.score:.0f}%</b>",
+        f"⏱ ระยะเวลาถือที่คาด: {_esc(cand.hold_time or '-')}",
         "━━━━━━━━━━━━━━",
         "🧠 <b>เหตุผลในการวิเคราะห์:</b>",
     ]
     lines += [f"• {_esc(r)}" for r in cand.reasons]
+    if getattr(cand, "risks", None):
+        lines += ["", "⚠️ <b>ปัจจัยที่อาจทำให้แผนนี้ล้มเหลว:</b>"]
+        lines += [f"• {_esc(r)}" for r in cand.risks]
     lines += ["", "📌 <b>หมายเหตุ:</b>"]
     lines += [f"• {_esc(n)}" for n in cand.notes]
     lines += [
@@ -223,3 +227,42 @@ def format_briefing(views, active: int, today: int) -> str:
     lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด — "
                  "ระบบจะแจ้งแยกต่างหากเมื่อมีจุดเข้าครบเงื่อนไข</i>")
     return "\n".join(lines)
+
+
+def format_no_setup(news_ctx, views) -> str:
+    """The message the spec asks for when nothing qualifies.
+
+    Also carries the news state, because "no setup" is only meaningful
+    if you know whether the system could see the calendar at all.
+    """
+    lines = ["🔎 <b>ยังไม่มีจุดเข้า</b>",
+             "ขณะนี้ยังไม่มีจุดเข้า Buy หรือ Sell ที่มีคุณภาพสูง "
+             "ระบบกำลังติดตามตลาดและข่าวล่าสุดอย่างต่อเนื่อง"]
+
+    if news_ctx is not None:
+        lines.append("")
+        if news_ctx.verified():
+            lines.append("📰 <b>สถานะข่าว:</b>")
+            for note in news_ctx.notes[:4]:
+                lines.append(f"• {_esc(note)}")
+            if news_ctx.sentiment:
+                summary = " · ".join(
+                    f"{cur}: {_SENTIMENT_TH.get(val, val)}"
+                    for cur, val in sorted(news_ctx.sentiment.items()))
+                lines.append(f"• ทิศทางจากข่าว → {summary}")
+        else:
+            lines.append("📰 <i>ไม่สามารถยืนยันข้อมูลข่าวล่าสุดได้ "
+                         "— ระบบจะไม่ใช้ข่าวประกอบการตัดสินใจจนกว่าจะเข้าถึงข้อมูลได้</i>")
+
+    # the symbol that came closest, so there is something to watch
+    if views:
+        best = max(views, key=lambda v: v.steps_passed)
+        if best.steps_passed >= 6:
+            tag = _PROFILE_TAG.get(getattr(best, "profile", ""), "")
+            lines.append("")
+            lines.append(f"👀 ใกล้ที่สุด: <b>{_esc(best.symbol)}</b> {tag} "
+                         f"({best.steps_passed}/11) — {_esc(best.waiting)}")
+    return "\n".join(lines)
+
+
+_SENTIMENT_TH = {"bullish": "แข็ง", "bearish": "อ่อน", "neutral": "กลาง"}

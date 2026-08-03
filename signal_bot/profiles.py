@@ -45,6 +45,7 @@ class Profile:
 
     # --- lifecycle ------------------------------------------------------
     expiry_hours: int = 12
+    hold_time: str = ""            # expected holding time, shown in signals
     note: str = ""                 # style-specific advice in the message
 
     def timeframes(self) -> list:
@@ -82,6 +83,7 @@ SCALP = Profile(
     require_fvg=False,
     require_mitigation=False,
     expiry_hours=4,
+    hold_time="15 นาที – 2 ชั่วโมง",
     note="ไม้สั้น ถือไม่กี่นาทีถึงชั่วโมง — ตั้ง SL/TP ทันทีและอย่าถือข้ามข่าว",
 )
 
@@ -103,6 +105,7 @@ TURBO = Profile(
     require_mitigation=False,
     require_premium_discount=False,
     expiry_hours=2,
+    hold_time="5 – 30 นาที",
     note="ไม้เร็วมาก ถือไม่กี่นาที — ราคาอาจวิ่งไปแล้วตอนได้รับ ให้ดู Entry Zone เป็นหลัก",
 )
 
@@ -121,6 +124,7 @@ DAY = Profile(
     score_threshold=90.0,
     min_ob_quality=60.0,
     expiry_hours=12,
+    hold_time="2 – 12 ชั่วโมง (ภายในวัน)",
     note="ไม้รายวัน ปิดก่อนจบวันได้ — เลื่อน SL เป็น BE เมื่อถึง TP1",
 )
 
@@ -139,6 +143,7 @@ RUN_TREND = Profile(
     score_threshold=88.0,
     min_ob_quality=65.0,
     expiry_hours=72,
+    hold_time="1 – 5 วัน",
     note="ไม้ยาว ถือข้ามวันถึงสัปดาห์ — ปิดบางส่วนที่ TP1 แล้วปล่อยที่เหลือวิ่ง",
 )
 
