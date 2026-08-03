@@ -351,3 +351,16 @@ def volume_ratio(df: pd.DataFrame, bars: int = 20) -> float:
     if vol.empty or vol.mean() == 0:
         return 1.0
     return float(vol.iloc[-1] / vol.mean())
+
+
+def cmf(df: pd.DataFrame, period: int = 20) -> float:
+    """Chaikin Money Flow at the last closed bar (-1..+1)."""
+    window = df.iloc[-(period + 1):-1]
+    rng = (window["high"] - window["low"]).replace(0, np.nan)
+    mult = ((window["close"] - window["low"]) -
+            (window["high"] - window["close"])) / rng
+    vol = window["volume"]
+    total = float(vol.sum())
+    if total <= 0 or mult.isna().all():
+        return 0.0
+    return float((mult.fillna(0) * vol).sum() / total)

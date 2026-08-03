@@ -68,7 +68,7 @@ class Settings:
     # --- symbol universe (priority order matters) --------------------
     tier1: list[str] = field(default_factory=lambda: _env_list("TIER1_SYMBOLS", "XAUUSD"))
     tier2: list[str] = field(default_factory=lambda: _env_list(
-        "TIER2_SYMBOLS", "EURUSD,GBPUSD,USDJPY"))
+        "TIER2_SYMBOLS", "EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))
     tier3: list[str] = field(default_factory=lambda: _env_list("TIER3_SYMBOLS", ""))
     tier3_extra: float = field(default_factory=lambda: _env_float("TIER3_EXTRA", 2.0))
 
@@ -118,21 +118,31 @@ class Settings:
     ny_kz: tuple[int, int] = field(
         default_factory=lambda: (_env_int("NY_KZ_START", 13), _env_int("NY_KZ_END", 16)))
 
+    # --- news --------------------------------------------------------------
+    use_news: bool = field(default_factory=lambda: _env_bool("USE_NEWS", True))
+    news_pre_min: int = field(default_factory=lambda: _env_int("NEWS_PRE_MIN", 45))
+    news_post_min: int = field(default_factory=lambda: _env_int("NEWS_POST_MIN", 45))
+    news_soft_min: int = field(default_factory=lambda: _env_int("NEWS_SOFT_MIN", 120))
+
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
     # รายงานวิเคราะห์กราฟทุกกี่นาที (0 = ปิด). สแกนทุก 5 นาทีแต่รายงาน
     # ทุก 5 นาทีจะได้ ~288 ข้อความ/วัน จึงตั้งค่าเริ่มต้นไว้ที่ 60 นาที
     briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 60))
+    # แจ้ง "ยังไม่มีจุดเข้า" ทุกกี่นาที (0 = ปิด) - ต่อท้ายรายงานภาพรวม
+    no_setup_notice: bool = field(default_factory=lambda: _env_bool("NO_SETUP_NOTICE", True))
 
     # --- scoring weights ---------------------------------------------------
     weights: dict[str, float] = field(default_factory=lambda: {
-        "structure": _env_float("W_STRUCTURE", 25.0),
+        "smc": _env_float("W_SMC", 30.0),           # BOS/CHoCH + OB + FVG
         "liquidity": _env_float("W_LIQUIDITY", 20.0),
-        "bos_choch": _env_float("W_BOS_CHOCH", 20.0),
-        "orderblock": _env_float("W_ORDERBLOCK", 15.0),
-        "fvg": _env_float("W_FVG", 10.0),
+        "trend": _env_float("W_TREND", 15.0),       # multi-timeframe alignment
+        "ict": _env_float("W_ICT", 10.0),           # OTE, PO3, kill zone
         "volume": _env_float("W_VOLUME", 5.0),
         "indicator": _env_float("W_INDICATOR", 5.0),
+        "rr": _env_float("W_RR", 5.0),
+        "spread": _env_float("W_SPREAD", 5.0),
+        "news": _env_float("W_NEWS", 5.0),
     })
 
     def gate(self, name: str, profile_default: bool) -> bool:

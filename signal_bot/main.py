@@ -17,6 +17,7 @@ import sys
 from datetime import datetime, timezone
 
 from . import data as market_data
+from . import news as news_feed
 from . import notifier
 from .analyzer import analyse
 from .config import Settings
@@ -31,6 +32,22 @@ def in_kill_zone(cfg: Settings, now: datetime) -> bool:
     hour = now.hour
     return (cfg.london_kz[0] <= hour < cfg.london_kz[1]
             or cfg.ny_kz[0] <= hour < cfg.ny_kz[1])
+
+
+def current_session(now: datetime) -> str:
+    """Which session is open, in UTC. Overlap is the highest-quality window."""
+    hour = now.hour
+    london = 7 <= hour < 16
+    newyork = 12 <= hour < 21
+    if london and newyork:
+        return "Overlap"
+    if london:
+        return "London"
+    if newyork:
+        return "NewYork"
+    if 23 <= hour or hour < 7:
+        return "Asian"
+    return ""
 
 
 def market_open(now: datetime) -> bool:
@@ -104,7 +121,9 @@ class Hold:
 
 
 def scan(state: State, tg: notifier.Telegram, cfg: Settings,
-         now: datetime, cache: market_data.Cache) -> tuple[list, list[str], list]:
+         now: datetime, cache: market_data.Cache,
+         news_ctx=None, session: str = "",
+         in_kz: bool = False) -> tuple[list, list[str], list]:
     """Analyse the universe and issue any qualifying signals.
 
     Returns (rejections, errors, views) - views always covers every
@@ -127,7 +146,8 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
                 errors.append(str(exc))
                 continue
 
-            cand, rejection, view = analyse(symbol, tier, frames, cfg, prof)
+            cand, rejection, view = analyse(
+                symbol, tier, frames, cfg, prof, news_ctx, session, in_kz)
             views.append(view)
             if rejection:
                 rejections.append(rejection)
@@ -196,13 +216,32 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("market closed - tracking skipped")
 
+    # --- news context: fetched once per run, shared by every symbol ---
+    news_ctx = None
+    if cfg.use_news:
+        symbols = [sym for sym, _ in cfg.universe()]
+        news_ctx = news_feed.build(
+            now, news_feed.currencies_for(symbols),
+            cfg.news_pre_min, cfg.news_post_min, cfg.news_soft_min)
+        if news_ctx.available:
+            print(f"news: ok · score {news_ctx.score:.0f}"
+                  + (f" · BLOCKING: {news_ctx.blocking_reason}" if news_ctx.blocking else ""))
+        else:
+            print(f"news: unavailable ({news_ctx.error[:80]}) - not used as evidence")
+
+    session = current_session(now)
+    in_kz = in_kill_zone(cfg, now)
+
     rejections, errors, views = [], [], []
     if not (market_open(now) or args.ignore_hours):
         print("market closed - no scan")
-    elif not (in_kill_zone(cfg, now) or args.ignore_hours):
+    elif not (in_kz or args.ignore_hours):
         print(f"outside kill zones (UTC hour {now.hour}) - no scan")
+    elif news_ctx is not None and news_ctx.blocking and not args.ignore_hours:
+        print(f"news blackout: {news_ctx.blocking_reason} - no scan")
     else:
-        rejections, errors, views = scan(state, tg, cfg, now, cache)
+        rejections, errors, views = scan(
+            state, tg, cfg, now, cache, news_ctx, session, in_kz)
 
     # --- chart briefing: the running commentary on the market ---------
     due = (cfg.briefing_minutes > 0
@@ -210,6 +249,9 @@ def main(argv: list[str] | None = None) -> int:
     if views and (due or args.brief):
         tg.send(notifier.format_briefing(
             views, len(state.live()), state.issued_today(now)))
+        # the spec's explicit "nothing qualifies right now" statement
+        if cfg.no_setup_notice and not any(v.steps_passed >= 11 for v in views):
+            tg.send(notifier.format_no_setup(news_ctx, views))
         state.last_briefing_at = now.isoformat(timespec="seconds")
         print(f"briefing sent for {len(views)} symbol(s)")
 

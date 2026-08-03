@@ -115,6 +115,10 @@ jobs:
           MIN_OB_QUALITY: ${{ vars.MIN_OB_QUALITY }}
           SEND_STATUS_REPORT: ${{ vars.SEND_STATUS_REPORT }}
           BRIEFING_MINUTES: ${{ vars.BRIEFING_MINUTES }}
+          NO_SETUP_NOTICE: ${{ vars.NO_SETUP_NOTICE }}
+          USE_NEWS: ${{ vars.USE_NEWS }}
+          NEWS_PRE_MIN: ${{ vars.NEWS_PRE_MIN }}
+          NEWS_POST_MIN: ${{ vars.NEWS_POST_MIN }}
           REQUEST_PAUSE: ${{ vars.REQUEST_PAUSE }}
           # ตัวเลือกจากปุ่ม Run workflow
           RUN_STATUS: ${{ inputs.status }}

@@ -38,9 +38,11 @@ class Candidate:
     score: float
     timeframe: str
     profile: str = "day"           # trading style this setup belongs to
+    hold_time: str = ""            # expected holding time
     bar_time: str = ""             # entry bar the setup formed on
     reasons: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)   # what could break this plan
     scores: dict[str, float] = field(default_factory=dict)
 
     @property
@@ -101,6 +103,8 @@ class MarketView:
     score: float = 0.0
     data_age_min: float = 0.0        # how old the newest candle is
     data_stale: bool = False
+    news_verified: bool = False      # False = calendar could not be reached
+    news_note: str = ""
 
 
 def _clamp(value: float) -> float:
@@ -129,46 +133,73 @@ def _tf_support(st: S.Structure, direction: int) -> float:
     return 0.5 if st.bias == direction else 0.0
 
 
-def _score_structure(direction: int, d1, h4, h1, entry) -> float:
+def _score_trend(direction: int, d1, h4, h1, entry) -> float:
+    """Trend Alignment 15% - do the timeframes agree on direction?"""
     return _clamp(20 * _tf_support(d1, direction) + 30 * _tf_support(h4, direction)
                   + 30 * _tf_support(h1, direction) + 20 * _tf_support(entry, direction))
 
 
+def _score_smc(direction: int, entry_st: S.Structure, ob: S.OrderBlock,
+               sm: S.SmartMoney) -> float:
+    """SMC Structure 30% - the structural evidence: BOS/CHoCH, OB, FVG.
+
+    This is the heaviest category because it is what the whole system is
+    built on: a break of structure in our direction, an institutional
+    zone to enter from, and an imbalance supporting the move.
+    """
+    score = 0.0
+    # structure break carries the most weight inside the category
+    if entry_st.bias == direction and entry_st.recent_bos:
+        score += 25.0
+    if entry_st.bias == direction and entry_st.recent_choch:
+        score += 15.0
+    # order block, scaled by its own quality and whether price is there
+    if ob.valid:
+        score += (ob.quality / 100.0) * (30.0 if ob.mitigating else 15.0)
+    # imbalance
+    fvg = sm.fvg_bull if direction > 0 else sm.fvg_bear
+    mitigated = sm.fvg_bull_mitigated if direction > 0 else sm.fvg_bear_mitigated
+    if fvg:
+        score += 20.0 if mitigated else 12.0
+    return _clamp(score)
+
+
 def _score_liquidity(direction: int, sm: S.SmartMoney) -> float:
+    """Liquidity 20% - was liquidity taken, and is there a pool to run at?"""
     score = 0.0
     if direction > 0:
-        score += 50 if sm.sweep_bull else 0
-        score += 25 if sm.bsl_above else 0
-        score += 25 if sm.range_pos <= 0.5 else 0
+        score += 45 if sm.sweep_bull else 0
+        score += 25 if sm.bsl_above else 0          # target above price
+        score += 20 if sm.range_pos <= 0.5 else 0   # buying at discount
+        score += 10 if sm.equal_lows else 0         # pool that was swept
     else:
-        score += 50 if sm.sweep_bear else 0
+        score += 45 if sm.sweep_bear else 0
         score += 25 if sm.ssl_below else 0
-        score += 25 if sm.range_pos >= 0.5 else 0
+        score += 20 if sm.range_pos >= 0.5 else 0
+        score += 10 if sm.equal_highs else 0
     return _clamp(score)
 
 
-def _score_bos(direction: int, entry: S.Structure) -> float:
+def _score_ict(direction: int, sm: S.SmartMoney, entry_st: S.Structure,
+               in_ote: bool, in_kill_zone: bool) -> float:
+    """ICT Setup 10% - OTE, Power of Three, kill zone, Judas-style reversal."""
     score = 0.0
-    if entry.bias == direction and entry.recent_bos:
-        score += 60
-    if entry.bias == direction and entry.recent_choch:
-        score += 40
+    if in_ote:
+        score += 30.0
+    if in_kill_zone:
+        score += 25.0
+    # Power of Three: manipulation (sweep) followed by distribution (BOS)
+    swept = sm.sweep_bull if direction > 0 else sm.sweep_bear
+    if swept and entry_st.recent_bos and entry_st.bias == direction:
+        score += 30.0
+    # Judas-style: liquidity grabbed against us, then structure flipped
+    if swept and entry_st.recent_choch and entry_st.bias == direction:
+        score += 15.0
     return _clamp(score)
-
-
-def _score_ob(ob: S.OrderBlock) -> float:
-    if not ob.valid:
-        return 0.0
-    return _clamp(ob.quality if ob.mitigating else ob.quality * 0.5)
-
-
-def _score_fvg(direction: int, sm: S.SmartMoney) -> float:
-    exists = sm.fvg_bull if direction > 0 else sm.fvg_bear
-    mitigated = sm.fvg_bull_mitigated if direction > 0 else sm.fvg_bear_mitigated
-    return _clamp((50 if exists else 0) + (50 if mitigated else 0))
 
 
 def _score_volume(direction: int, entry_df: pd.DataFrame) -> float:
+    """Volume 5% - is there participation behind the move?"""
     ratio = S.volume_ratio(entry_df)
     if ratio >= 1.5:
         score = 70.0
@@ -178,7 +209,6 @@ def _score_volume(direction: int, entry_df: pd.DataFrame) -> float:
         score = 35.0
     else:
         score = 15.0
-    # a rising close in the trade direction adds a little confirmation
     closes = entry_df["close"]
     if len(closes) > 6:
         slope = float(closes.iloc[-2] - closes.iloc[-6])
@@ -187,23 +217,56 @@ def _score_volume(direction: int, entry_df: pd.DataFrame) -> float:
     return _clamp(score)
 
 
-def _score_indicator(direction: int, entry_df: pd.DataFrame, h1_df: pd.DataFrame) -> float:
+def _score_indicator(direction: int, entry_df: pd.DataFrame,
+                     h1_df: pd.DataFrame) -> float:
+    """Indicator Confirmation 5% - agreement only, never a reason to enter."""
     score = 0.0
     if S.ema_trend(entry_df) == direction:
-        score += 30
+        score += 25
     r = float(S.rsi(entry_df["close"]).iloc[-2])
     if direction > 0 and 50 < r < 70:
-        score += 35
+        score += 25
     if direction < 0 and 30 < r < 50:
-        score += 35
+        score += 25
     main, signal = S.macd(h1_df["close"])
     if (main > signal) == (direction > 0):
-        score += 35
+        score += 25
+    if S.cmf(entry_df) * direction > 0:
+        score += 25
+    return _clamp(score)
+
+
+def _score_rr(planned_rr: float) -> float:
+    """Risk Reward 5% - reward the setups that pay more for the same risk."""
+    if planned_rr >= 4.0:
+        return 100.0
+    if planned_rr >= 3.0:
+        return 90.0
+    if planned_rr >= 2.0:
+        return 75.0
+    if planned_rr >= 1.5:
+        return 55.0
+    return 25.0
+
+
+def _score_spread(session: str, vol_state: str) -> float:
+    """Spread 5% - execution conditions.
+
+    The free OHLC feeds carry no bid/ask, so real spread cannot be
+    measured. This estimates execution quality from the two things that
+    actually drive it: which session is open, and how violent the market
+    is right now. Reported as an estimate, never as a measured spread.
+    """
+    score = {"Overlap": 100.0, "London": 85.0, "NewYork": 85.0,
+             "Asian": 45.0}.get(session, 30.0)
+    if vol_state == "high":
+        score -= 25.0          # spreads widen when volatility spikes
     return _clamp(score)
 
 
 def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
-            cfg: Settings, prof: Profile
+            cfg: Settings, prof: Profile, news_ctx=None,
+            session: str = "", in_kill_zone: bool = False
             ) -> tuple[Optional[Candidate], Optional[Rejection], MarketView]:
     """Run the full SMC pipeline for one symbol.
 
@@ -221,6 +284,9 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     view.tf_names = (prof.htf_major, prof.htf_mid, prof.htf_minor, entry_tf)
     view.price = float(entry_df["close"].iloc[-1])
     view.data_age_min, view.data_stale = freshness(entry_df, entry_tf)
+    if news_ctx is not None:
+        view.news_verified = news_ctx.verified()
+        view.news_note = (news_ctx.notes[0] if news_ctx.notes else "")
 
     def reject(stage: str, detail: str):
         view.waiting = detail
@@ -337,17 +403,26 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     sl_dist = min(sl_dist, atr_value * prof.max_sl_atr)
 
     # --- confidence score ----------------------------------------------
+    # volatility state from ATR against its own recent average
+    atr_series = entry_df["high"].sub(entry_df["low"]).rolling(50).mean()
+    baseline = float(atr_series.iloc[-2]) if len(atr_series) > 50 else atr_value
+    vol_state = "high" if baseline > 0 and atr_value > baseline * 1.4 else "normal"
+    planned_rr = prof.tp_r[1]
+    news_score = news_ctx.score if news_ctx is not None else 50.0
+
     parts = {
-        "structure": _score_structure(direction, st_d1, st_h4, st_h1, st_entry),
+        "smc": _score_smc(direction, st_entry, ob, sm),
         "liquidity": _score_liquidity(direction, sm),
-        "bos_choch": _score_bos(direction, st_entry),
-        "orderblock": _score_ob(ob),
-        "fvg": _score_fvg(direction, sm),
+        "trend": _score_trend(direction, st_d1, st_h4, st_h1, st_entry),
+        "ict": _score_ict(direction, sm, st_entry, in_ote, in_kill_zone),
         "volume": _score_volume(direction, entry_df),
         "indicator": _score_indicator(direction, entry_df, h1_df),
+        "rr": _score_rr(planned_rr),
+        "spread": _score_spread(session, vol_state),
+        "news": news_score,
     }
     weights = cfg.weights
-    total = sum(parts[k] * weights[k] for k in parts) / sum(weights.values())
+    total = sum(parts[k] * weights.get(k, 0.0) for k in parts) / sum(weights.values())
 
     view.score = round(total, 1)
     threshold = (cfg.number("SCORE_THRESHOLD", prof.score_threshold)
@@ -375,7 +450,8 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         tp2=r(price + sl_dist * prof.tp_r[1] if is_buy else price - sl_dist * prof.tp_r[1]),
         tp3=r(price + sl_dist * prof.tp_r[2] if is_buy else price - sl_dist * prof.tp_r[2]),
         rr=prof.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
-        profile=prof.name, bar_time=str(entry_df.index[-2]),
+        profile=prof.name, hold_time=prof.hold_time,
+        bar_time=str(entry_df.index[-2]),
     )
 
     bias = (f"{prof.htf_major}:{st_d1.trend} {prof.htf_mid}:{st_h4.trend} "
@@ -404,4 +480,36 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     cand.notes.append("หลีกเลี่ยงการเข้าใกล้ช่วงประกาศข่าวสำคัญ")
     if prof.note:
         cand.notes.append(prof.note)
+
+    # --- what could invalidate this plan -------------------------------
+    opposite = "ต่ำกว่า" if is_buy else "สูงกว่า"
+    cand.risks.append(f"ราคาปิด{opposite} SL ({cand.sl}) = โครงสร้างเสีย ต้องออก")
+    if st_entry.recent_choch:
+        cand.risks.append("เข้าจาก CHoCH ซึ่งเป็นการกลับตัว หากไม่ตามต่อจะเป็นสัญญาณหลอกได้")
+    if not (sm.sweep_bull if is_buy else sm.sweep_bear):
+        cand.risks.append("ยังไม่เห็น liquidity sweep ชัดเจน — อาจโดนกวาด stop ก่อนวิ่ง")
+    if view.range_pos > 0.7 and is_buy:
+        cand.risks.append(f"ราคาอยู่ค่อนไปทาง premium ({view.range_pos:.2f}) เหลือระยะวิ่งน้อย")
+    if view.range_pos < 0.3 and not is_buy:
+        cand.risks.append(f"ราคาอยู่ค่อนไปทาง discount ({view.range_pos:.2f}) เหลือระยะวิ่งน้อย")
+    if news_ctx is not None and not news_ctx.verified():
+        cand.risks.append("ไม่สามารถยืนยันข่าวล่าสุดได้ — อาจมีข่าวที่ระบบไม่เห็น")
+    elif news_ctx is not None and news_ctx.upcoming:
+        soon = news_ctx.upcoming[0]
+        cand.risks.append(f"มีข่าวแรงใกล้เข้ามา: {soon.title} ({soon.currency})")
+    if view.data_stale:
+        cand.risks.append(f"ข้อมูลราคาช้า {view.data_age_min:.0f} นาที ตรวจราคาจริงก่อนเข้า")
+
+    # --- news, only when it was actually verified ----------------------
+    if news_ctx is not None and news_ctx.verified():
+        news_dir, news_why = news_ctx.bias_for(symbol)
+        if news_dir == direction:
+            cand.reasons.append(f"ข่าวสนับสนุน: {news_why}")
+        elif news_dir == -direction:
+            cand.reasons.append(f"⚠️ ข่าวสวนทาง: {news_why}")
+        else:
+            cand.reasons.append(f"ข่าว: {news_why}")
+    else:
+        cand.reasons.append("ข่าว: ไม่สามารถยืนยันข้อมูลล่าสุดได้ (ไม่ใช้ประกอบการตัดสินใจ)")
+
     return cand, None, view
