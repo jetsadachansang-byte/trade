@@ -51,11 +51,34 @@ def _esc(value) -> str:
     return html.escape(str(value), quote=False)
 
 
+def format_section(horizon: str, count: int) -> str:
+    """The banner that opens a group of signals.
+
+    Short-term and long-hold setups are announced under separate banners
+    because they are managed completely differently - a run-trend position
+    that gets scalped out at TP1 was never a run-trend position.
+    """
+    if horizon == "long":
+        return ("🚀 <b>สัญญาณสายถือยาว / Run Trend</b>\n"
+                f"<i>{count} สัญญาณ · ถือข้ามวันถึงสัปดาห์</i>\n"
+                "แยกส่วนจากไม้สั้น — ปิดบางส่วนที่ TP1 แล้วปล่อยที่เหลือวิ่ง\n"
+                "━━━━━━━━━━━━━━")
+    return ("⚡ <b>สัญญาณสายเก็บสั้น / Day Trade</b>\n"
+            f"<i>{count} สัญญาณ · ปิดภายในวัน</i>\n"
+            "ตั้ง SL/TP ทันทีที่เข้า และเลื่อน SL เป็น BE เมื่อถึง TP1\n"
+            "━━━━━━━━━━━━━━")
+
+
 def format_signal(cand, signal_id: int, prof=None) -> str:
     """The full signal message."""
     arrow = "📈" if cand.direction > 0 else "📉"
     head = (f"{prof.emoji} <b>{_esc(prof.label)}</b> · TF {_esc(cand.timeframe)}"
             if prof else f"TF {_esc(cand.timeframe)}")
+    # repeat the section on the signal itself: messages get forwarded and
+    # read on their own, and holding a swing trade like a scalp is costly
+    if prof is not None:
+        head += ("\n🚀 <i>สายถือยาว (Run Trend)</i>" if prof.is_long_hold
+                 else "\n⚡ <i>สายเก็บสั้น (Day Trade)</i>")
     lines = [
         head,
         f"📊 <b>สินทรัพย์: {_esc(cand.symbol)}</b>",
@@ -139,10 +162,11 @@ def format_status(rejections, active: int, today: int, errors) -> str:
 _TREND_LABEL = {"UP": "ขาขึ้น ▲", "DOWN": "ขาลง ▼", "SIDE": "ออกข้าง ↔"}
 _PROFILE_TAG = {"turbo": "🔥M1", "scalp": "⚡M5", "day": "📊M15", "trend": "🚀H1"}
 _GRADE_ADVICE = {
-    "A+": "คุณภาพสูงสุด — ขนาดไม้ปกติ",
+    "S": "คุณภาพสูงสุด — ขนาดไม้ปกติได้เต็มที่",
     "A": "คุณภาพดี — ขนาดไม้ปกติ",
     "B": "คุณภาพปานกลาง — ลดขนาดไม้เหลือ 50-70%",
-    "C": "คุณภาพต่ำ — ลดขนาดไม้เหลือ 30-50% หรือข้ามไม้นี้",
+    "C": "คุณภาพพอใช้ — ลดขนาดไม้เหลือ 30-50%",
+    "D": "คุณภาพต่ำสุดที่ระบบยอมส่ง — ลดขนาดไม้เหลือ 20-30% หรือข้ามไม้นี้",
 }
 _TOTAL_STEPS = 11
 
@@ -157,17 +181,49 @@ def _trend(label: str) -> str:
     return _TREND_LABEL.get(label, label)
 
 
-def format_briefing(views, active: int, today: int) -> str:
+def _is_long_hold(profile_name: str) -> bool:
+    from .profiles import ALL as _PROFILES
+    prof = _PROFILES.get(profile_name)
+    return bool(prof and prof.is_long_hold)
+
+
+def format_briefing(views, active: int, today: int, counts=None) -> str:
     """One message covering every analysed symbol.
 
     Reports trend across timeframes, the levels that matter, and how far
     each symbol has moved through the entry pipeline - so the market can
     be followed continuously instead of only when a signal fires.
+
+    `counts` is an optional (gold_today, gold_target, pair_today,
+    pair_target) tuple, shown so the daily pacing is visible.
     """
     lines = ["📈 <b>วิเคราะห์กราฟ — ภาพรวมตลาด</b>",
              f"<i>สัญญาณวันนี้ {today} · กำลังติดตาม {active}</i>"]
+    if counts:
+        gold_today, gold_target, pair_today, pair_target = counts
+        lines.append(f"<i>ทอง {gold_today}/{gold_target} · "
+                     f"คู่เงิน {pair_today}/{pair_target}</i>")
 
-    # symbols closest to a signal first - that is what needs attention
+    short_views = [v for v in views if not _is_long_hold(getattr(v, "profile", ""))]
+    long_views = [v for v in views if _is_long_hold(getattr(v, "profile", ""))]
+
+    for group, header in ((short_views, "⚡ <b>สายเก็บสั้น (Day Trade / Scalp)</b>"),
+                          (long_views, "🚀 <b>สายถือยาว (Run Trend)</b>")):
+        if not group:
+            continue
+        lines.append("")
+        lines.append(header)
+        lines.extend(_briefing_block(group))
+
+    lines.append("━━━━━━━━━━━━━━")
+    lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด — "
+                 "ระบบจะแจ้งแยกต่างหากเมื่อมีจุดเข้าครบเงื่อนไข</i>")
+    return "\n".join(lines)
+
+
+def _briefing_block(views) -> list:
+    """The per-symbol detail rows of the briefing, closest to a signal first."""
+    lines = []
     for v in sorted(views, key=lambda x: -x.steps_passed):
         style = _PROFILE_TAG.get(getattr(v, "profile", ""), "")
         lines.append("━━━━━━━━━━━━━━")
@@ -230,11 +286,7 @@ def format_briefing(views, active: int, today: int) -> str:
         if v.waiting:
             near = "🔥 " if v.steps_passed >= 8 else "⏳ "
             lines.append(f"{near}{_esc(v.waiting)}")
-
-    lines.append("━━━━━━━━━━━━━━")
-    lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด — "
-                 "ระบบจะแจ้งแยกต่างหากเมื่อมีจุดเข้าครบเงื่อนไข</i>")
-    return "\n".join(lines)
+    return lines
 
 
 def format_no_setup(news_ctx, views) -> str:

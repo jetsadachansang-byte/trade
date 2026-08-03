@@ -37,6 +37,8 @@ class Signal:
     score: float
     timeframe: str
     created: str                       # ISO-8601 UTC
+    profile: str = ""                  # trading style that produced it
+    expiry_hours: int = 0              # 0 = fall back to the global setting
     bar_time: str = ""                 # entry bar this signal came from
     status: str = ACTIVE
     tp1_hit: bool = False
@@ -94,11 +96,19 @@ class State:
     def live(self) -> list[Signal]:
         return [s for s in self.signals if s.is_live]
 
-    def has_live(self, symbol: str) -> bool:
-        return any(s.symbol == symbol and s.is_live for s in self.signals)
+    def has_live(self, symbol: str, profile: str = "") -> bool:
+        """Is a signal still running for this symbol (optionally this style)?
 
-    def signalled_this_bar(self, symbol: str, bar_time: str) -> bool:
-        """Already issued a signal for this symbol on this candle?
+        Styles are tracked separately: a scalp and a swing position on the
+        same symbol are different trades and must not block each other.
+        """
+        return any(s.symbol == symbol and s.is_live
+                   and (not profile or s.profile == profile)
+                   for s in self.signals)
+
+    def signalled_this_bar(self, symbol: str, profile: str,
+                           bar_time: str) -> bool:
+        """Already issued a signal for this symbol/style on this candle?
 
         Without a cooldown the scan can run several times inside one
         entry-timeframe bar, so this stops the same setup being sent
@@ -107,11 +117,21 @@ class State:
         if not bar_time:
             return False
         return any(s.symbol == symbol and s.bar_time == bar_time
+                   and (not profile or s.profile == profile)
                    for s in self.signals)
 
-    def issued_today(self, now: datetime) -> int:
+    def issued_today(self, now: datetime, symbols=None,
+                     exclude=None) -> int:
+        """Signals issued today, optionally restricted to a set of symbols.
+
+        The symbol filters exist because gold and the currency pairs are
+        paced against separate daily targets.
+        """
         today = now.date()
-        return sum(1 for s in self.signals if s.created_at().date() == today)
+        return sum(1 for s in self.signals
+                   if s.created_at().date() == today
+                   and (symbols is None or s.symbol in symbols)
+                   and (exclude is None or s.symbol not in exclude))
 
     def minutes_since_last(self, now: datetime) -> float:
         if not self.last_signal_at:

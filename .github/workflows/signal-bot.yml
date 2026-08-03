@@ -104,6 +104,8 @@ jobs:
           SCORE_THRESHOLD: ${{ vars.SCORE_THRESHOLD }}
           MAX_SIGNALS_PER_DAY: ${{ vars.MAX_SIGNALS_PER_DAY }}
           DAILY_SIGNAL_TARGET: ${{ vars.DAILY_SIGNAL_TARGET }}
+          GOLD_SYMBOLS: ${{ vars.GOLD_SYMBOLS }}
+          GOLD_DAILY_TARGET: ${{ vars.GOLD_DAILY_TARGET }}
           ADAPTIVE_THRESHOLD: ${{ vars.ADAPTIVE_THRESHOLD }}
           MIN_SCORE_FLOOR: ${{ vars.MIN_SCORE_FLOOR }}
           COOLDOWN_MINUTES: ${{ vars.COOLDOWN_MINUTES }}
