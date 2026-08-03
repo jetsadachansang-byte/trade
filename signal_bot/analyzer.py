@@ -112,23 +112,29 @@ def _clamp(value: float) -> float:
     return max(0.0, min(100.0, value))
 
 
-# Quality bands. A relaxed threshold can let a weaker setup through, so
-# the grade travels with the signal and drives the sizing advice.
-GRADES = ((90.0, "A+"), (85.0, "A"), (78.0, "B"), (0.0, "C"))
+# Quality bands, best to worst. A relaxed threshold can let a weaker setup
+# through, so the grade travels with the signal and drives the sizing
+# advice - a D is still a real setup that passed every structural gate,
+# it just cleared the score bar at its lowest.
+GRADES = ((92.0, "S"), (85.0, "A"), (78.0, "B"), (72.0, "C"), (0.0, "D"))
 
 GRADE_ADVICE = {
-    "A+": "คุณภาพสูงสุด — ขนาดไม้ปกติได้",
+    "S": "คุณภาพสูงสุด — ขนาดไม้ปกติได้เต็มที่",
     "A": "คุณภาพดี — ขนาดไม้ปกติได้",
     "B": "คุณภาพปานกลาง — แนะนำลดขนาดไม้เหลือ 50-70%",
-    "C": "คุณภาพต่ำ (ผ่านเกณฑ์ที่ผ่อนแล้ว) — แนะนำลดขนาดไม้เหลือ 30-50% หรือข้ามไม้นี้",
+    "C": "คุณภาพพอใช้ (ผ่านเกณฑ์ที่ผ่อนแล้ว) — แนะนำลดขนาดไม้เหลือ 30-50%",
+    "D": "คุณภาพต่ำสุดที่ระบบยอมส่ง — ลดขนาดไม้เหลือ 20-30% หรือข้ามไม้นี้ก็ได้",
 }
+
+# grades that only exist because the daily pacing lowered the bar
+RELAXED_GRADES = ("B", "C", "D")
 
 
 def grade_for(score: float) -> str:
     for cutoff, label in GRADES:
         if score >= cutoff:
             return label
-    return "C"
+    return "D"
 
 
 def _decide_direction(d1: S.Structure, h4: S.Structure, h1: S.Structure) -> int:
@@ -506,10 +512,10 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         cand.notes.append(prof.note)
 
     # --- what could invalidate this plan -------------------------------
-    if cand.grade in ("B", "C"):
+    if cand.grade in RELAXED_GRADES:
         cand.risks.append(
             f"สัญญาณเกรด {cand.grade} — ผ่านเกณฑ์ที่ผ่อนลงเพื่อให้ครบเป้าหมายรายวัน "
-            f"ไม่ใช่ setup ระดับ A")
+            f"ไม่ใช่ setup ระดับ S/A")
     opposite = "ต่ำกว่า" if is_buy else "สูงกว่า"
     cand.risks.append(f"ราคาปิด{opposite} SL ({cand.sl}) = โครงสร้างเสีย ต้องออก")
     if st_entry.recent_choch:

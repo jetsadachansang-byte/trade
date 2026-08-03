@@ -82,16 +82,24 @@ class Settings:
     max_signals_per_run: int = field(default_factory=lambda: _env_int("MAX_SIGNALS_PER_RUN", 0))
     cooldown_minutes: int = field(default_factory=lambda: _env_int("COOLDOWN_MINUTES", 0))
     # --- adaptive threshold ------------------------------------------
-    # Target signals per day. The market does not produce setups on
-    # schedule, so this cannot be a guarantee - it lowers the score bar
-    # when the day is running behind, never below the floor, and every
-    # signal is graded so a relaxed one is visibly a relaxed one.
+    # Target signals per day (the 7-10 band, paced at its midpoint). The
+    # market does not produce setups on schedule, so this cannot be a
+    # guarantee - it lowers the score bar when the day is running behind,
+    # never below the floor, and every signal is graded so a relaxed one
+    # is visibly a relaxed one.
     daily_signal_target: int = field(
-        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 7))
+        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 9))
+    # Gold is the primary instrument and is paced against its own target,
+    # so a quiet FX session cannot eat into the gold count and vice versa.
+    # Nothing caps it: if gold offers more than this, the extras are sent.
+    gold_symbols: list[str] = field(
+        default_factory=lambda: _env_list("GOLD_SYMBOLS", "XAUUSD"))
+    gold_daily_target: int = field(
+        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 4))
     adaptive_threshold: bool = field(
         default_factory=lambda: _env_bool("ADAPTIVE_THRESHOLD", True))
     min_score_floor: float = field(
-        default_factory=lambda: _env_float("MIN_SCORE_FLOOR", 68.0))
+        default_factory=lambda: _env_float("MIN_SCORE_FLOOR", 66.0))
     signal_expiry_hours: int = field(default_factory=lambda: _env_int("SIGNAL_EXPIRY_HOURS", 12))
 
     # --- SMC pipeline gates --------------------------------------------
@@ -167,6 +175,18 @@ class Settings:
     def number(self, name: str, profile_default: float) -> float:
         """Same idea for numeric thresholds."""
         return _env_float(name, profile_default)
+
+    def is_gold(self, symbol: str) -> bool:
+        return symbol in self.gold_symbols
+
+    @property
+    def pair_daily_target(self) -> int:
+        """What the currency pairs are expected to contribute.
+
+        Gold carries its own quota, so the pairs only have to make up the
+        remainder of the daily target.
+        """
+        return max(0, self.daily_signal_target - self.gold_daily_target)
 
     def universe(self) -> list[tuple[str, int]]:
         """(symbol, tier) pairs in send-priority order."""

@@ -48,6 +48,21 @@ class Profile:
     hold_time: str = ""            # expected holding time, shown in signals
     note: str = ""                 # style-specific advice in the message
 
+    # --- how this style is announced and paced ---------------------------
+    # "short" styles are closed the same day and are announced together;
+    # "long" styles are held across days and get their own section, because
+    # mixing a five-minute scalp into a multi-day position list is how a
+    # swing trade ends up being managed like a scalp.
+    horizon: str = "short"
+    # How much of the daily-pacing relaxation this style is allowed to take.
+    # The bias is deliberate: short-term styles carry the daily count, while
+    # a multi-day position is only ever taken at close to full quality.
+    pace_weight: float = 1.0
+
+    @property
+    def is_long_hold(self) -> bool:
+        return self.horizon == "long"
+
     def timeframes(self) -> list:
         """Every timeframe this profile needs loaded, de-duplicated."""
         wanted = [self.htf_major, self.htf_mid, self.htf_minor,
@@ -85,6 +100,8 @@ SCALP = Profile(
     expiry_hours=4,
     hold_time="15 นาที – 2 ชั่วโมง",
     note="ไม้สั้น ถือไม่กี่นาทีถึงชั่วโมง — ตั้ง SL/TP ทันทีและอย่าถือข้ามข่าว",
+    horizon="short",
+    pace_weight=1.0,
 )
 
 # Fastest profile: one-minute entries off a M15/M5 structure read. Only
@@ -107,6 +124,10 @@ TURBO = Profile(
     expiry_hours=2,
     hold_time="5 – 30 นาที",
     note="ไม้เร็วมาก ถือไม่กี่นาที — ราคาอาจวิ่งไปแล้วตอนได้รับ ให้ดู Entry Zone เป็นหลัก",
+    horizon="short",
+    # already the loosest bar in the system; let it relax a little less than
+    # the M5/M15 styles so the daily count is not carried by M1 noise
+    pace_weight=0.8,
 )
 
 # ----------------------------------------------------------------------
@@ -126,6 +147,9 @@ DAY = Profile(
     expiry_hours=12,
     hold_time="2 – 12 ชั่วโมง (ภายในวัน)",
     note="ไม้รายวัน ปิดก่อนจบวันได้ — เลื่อน SL เป็น BE เมื่อถึง TP1",
+    horizon="short",
+    # the style the daily target is built around
+    pace_weight=1.0,
 )
 
 # ----------------------------------------------------------------------
@@ -145,6 +169,10 @@ RUN_TREND = Profile(
     expiry_hours=72,
     hold_time="1 – 5 วัน",
     note="ไม้ยาว ถือข้ามวันถึงสัปดาห์ — ปิดบางส่วนที่ TP1 แล้วปล่อยที่เหลือวิ่ง",
+    horizon="long",
+    # a position held for days is never worth taking just to fill a daily
+    # quota, so this style barely moves off its bar
+    pace_weight=0.3,
 )
 
 ALL: dict = {p.name: p for p in (TURBO, SCALP, DAY, RUN_TREND)}
