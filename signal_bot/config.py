@@ -45,8 +45,20 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def _env_list(name: str, default: str) -> list[str]:
+    """Comma-separated symbols, normalised to upper case."""
     raw = os.getenv(name, "").strip() or default
     return [item.strip().upper() for item in raw.split(",") if item.strip()]
+
+
+def _env_names(name: str, default: str) -> list[str]:
+    """Comma-separated identifiers, normalised to lower case.
+
+    Profile keys are lower case, so upper-casing them the way symbols are
+    normalised made every configured style look unknown and failed
+    validation before a scan could start.
+    """
+    raw = os.getenv(name, "").strip() or default
+    return [item.strip().lower() for item in raw.split(",") if item.strip()]
 
 
 @dataclass
@@ -62,7 +74,7 @@ class Settings:
     request_pause: float = field(default_factory=lambda: _env_float("REQUEST_PAUSE", 0.0))
 
     # --- trading styles ----------------------------------------------
-    profiles: list[str] = field(default_factory=lambda: _env_list(
+    profiles: list[str] = field(default_factory=lambda: _env_names(
         "PROFILES", "turbo,scalp,day,trend"))
 
     # --- symbol universe (priority order matters) --------------------
