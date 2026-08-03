@@ -37,6 +37,7 @@ class Signal:
     score: float
     timeframe: str
     created: str                       # ISO-8601 UTC
+    bar_time: str = ""                 # entry bar this signal came from
     status: str = ACTIVE
     tp1_hit: bool = False
     tp2_hit: bool = False
@@ -92,6 +93,18 @@ class State:
 
     def has_live(self, symbol: str) -> bool:
         return any(s.symbol == symbol and s.is_live for s in self.signals)
+
+    def signalled_this_bar(self, symbol: str, bar_time: str) -> bool:
+        """Already issued a signal for this symbol on this candle?
+
+        Without a cooldown the scan can run several times inside one
+        entry-timeframe bar, so this stops the same setup being sent
+        again the moment a previous signal closes.
+        """
+        if not bar_time:
+            return False
+        return any(s.symbol == symbol and s.bar_time == bar_time
+                   for s in self.signals)
 
     def issued_today(self, now: datetime) -> int:
         today = now.date()

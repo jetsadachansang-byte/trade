@@ -108,8 +108,9 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
 
     cap_reached = (cfg.max_signals_per_day > 0
                    and state.issued_today(now) >= cfg.max_signals_per_day)
-    in_cooldown = state.minutes_since_last(now) < cfg.cooldown_minutes
-    sent = False
+    in_cooldown = (cfg.cooldown_minutes > 0
+                   and state.minutes_since_last(now) < cfg.cooldown_minutes)
+    sent = 0
 
     for symbol, tier in cfg.universe():
         try:
@@ -124,12 +125,15 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
         if rejection:
             rejections.append(rejection)
             continue
-        if sent or cap_reached or in_cooldown or state.has_live(symbol):
+        run_full = (cfg.max_signals_per_run > 0 and sent >= cfg.max_signals_per_run)
+        same_bar = state.signalled_this_bar(symbol, cand.bar_time)
+        if run_full or cap_reached or in_cooldown or state.has_live(symbol) or same_bar:
             # a qualifying setup we deliberately hold back this run
-            reason = ("ส่งสัญญาณอื่นไปแล้วในรอบนี้" if sent else
+            reason = ("ครบโควตาสัญญาณของรอบนี้" if run_full else
                       "ครบโควตาสัญญาณของวันนี้" if cap_reached else
                       "อยู่ในช่วง cooldown" if in_cooldown else
-                      "มีสัญญาณ active ของ symbol นี้อยู่แล้ว")
+                      "มีสัญญาณ active ของ symbol นี้อยู่แล้ว" if state.has_live(symbol) else
+                      "ส่งสัญญาณของแท่งนี้ไปแล้ว")
             rejections.append(Hold(symbol, reason))
             continue
 
@@ -139,12 +143,13 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
             entry=cand.entry, entry_low=cand.entry_low, entry_high=cand.entry_high,
             sl=cand.sl, tp1=cand.tp1, tp2=cand.tp2, tp3=cand.tp3,
             rr=cand.rr, score=cand.score, timeframe=cand.timeframe,
-            created=now.isoformat(timespec="seconds"), reasons=list(cand.reasons),
+            created=now.isoformat(timespec="seconds"), bar_time=cand.bar_time,
+            reasons=list(cand.reasons),
         ))
         state.last_signal_at = now.isoformat(timespec="seconds")
         tg.send(notifier.format_signal(cand, signal_id))
         print(f"SIGNAL {symbol} {cand.side} score {cand.score}")
-        sent = True
+        sent += 1
 
     return rejections, errors
 

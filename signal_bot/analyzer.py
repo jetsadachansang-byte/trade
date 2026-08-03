@@ -35,6 +35,7 @@ class Candidate:
     rr: float
     score: float
     timeframe: str
+    bar_time: str = ""             # entry bar the setup formed on
     reasons: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
@@ -272,6 +273,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         tp2=r(price + sl_dist * cfg.tp2_r if is_buy else price - sl_dist * cfg.tp2_r),
         tp3=r(price + sl_dist * cfg.tp3_r if is_buy else price - sl_dist * cfg.tp3_r),
         rr=cfg.tp2_r, score=round(total, 1), timeframe=entry_tf, scores=parts,
+        bar_time=str(entry_df.index[-2]),
     )
 
     bias = f"D1:{st_d1.trend} H4:{st_h4.trend} H1:{st_h1.trend}"
