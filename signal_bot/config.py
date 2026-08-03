@@ -61,6 +61,10 @@ class Settings:
     twelvedata_key: str = field(default_factory=lambda: _env_str("TWELVEDATA_API_KEY"))
     request_pause: float = field(default_factory=lambda: _env_float("REQUEST_PAUSE", 0.0))
 
+    # --- trading styles ----------------------------------------------
+    profiles: list[str] = field(default_factory=lambda: _env_list(
+        "PROFILES", "scalp,day,trend"))
+
     # --- symbol universe (priority order matters) --------------------
     tier1: list[str] = field(default_factory=lambda: _env_list("TIER1_SYMBOLS", "XAUUSD"))
     tier2: list[str] = field(default_factory=lambda: _env_list(
@@ -131,6 +135,18 @@ class Settings:
         "indicator": _env_float("W_INDICATOR", 5.0),
     })
 
+    def gate(self, name: str, profile_default: bool) -> bool:
+        """A pipeline gate: the profile decides unless an env var overrides.
+
+        Repository variables are global, so setting one applies to every
+        profile; leaving it unset lets each style keep its own strictness.
+        """
+        return _env_bool(name, profile_default)
+
+    def number(self, name: str, profile_default: float) -> float:
+        """Same idea for numeric thresholds."""
+        return _env_float(name, profile_default)
+
     def universe(self) -> list[tuple[str, int]]:
         """(symbol, tier) pairs in send-priority order."""
         pairs: list[tuple[str, int]] = []
@@ -147,6 +163,12 @@ class Settings:
             problems.append("TELEGRAM_CHAT_ID ยังไม่ได้ตั้ง")
         if not self.universe():
             problems.append("ไม่มี symbol ให้วิเคราะห์ (TIER1_SYMBOLS ว่าง)")
-        if self.entry_timeframe not in ("M15", "H1"):
-            problems.append("ENTRY_TIMEFRAME ต้องเป็น M15 หรือ H1")
+        from .profiles import ALL as PROFILE_ALL
+        unknown = [p for p in self.profiles if p not in PROFILE_ALL]
+        if unknown:
+            problems.append(
+                f"PROFILES มีชื่อที่ไม่รู้จัก: {', '.join(unknown)} "
+                f"(ใช้ได้: {', '.join(PROFILE_ALL)})")
+        if not any(p in PROFILE_ALL for p in self.profiles):
+            problems.append("PROFILES ว่าง - ต้องเลือกอย่างน้อย 1 สไตล์")
         return problems

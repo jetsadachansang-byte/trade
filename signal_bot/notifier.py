@@ -51,10 +51,13 @@ def _esc(value) -> str:
     return html.escape(str(value), quote=False)
 
 
-def format_signal(cand, signal_id: int) -> str:
+def format_signal(cand, signal_id: int, prof=None) -> str:
     """The full signal message."""
     arrow = "📈" if cand.direction > 0 else "📉"
+    head = (f"{prof.emoji} <b>{_esc(prof.label)}</b> · TF {_esc(cand.timeframe)}"
+            if prof else f"TF {_esc(cand.timeframe)}")
     lines = [
+        head,
         f"📊 <b>สินทรัพย์: {_esc(cand.symbol)}</b>",
         f"{arrow} <b>ประเภท: {cand.side}</b>",
         "━━━━━━━━━━━━━━",
@@ -128,6 +131,7 @@ def format_status(rejections, active: int, today: int, errors) -> str:
 # whether or not any setup qualifies.
 # ----------------------------------------------------------------------
 _TREND_LABEL = {"UP": "ขาขึ้น ▲", "DOWN": "ขาลง ▼", "SIDE": "ออกข้าง ↔"}
+_PROFILE_TAG = {"turbo": "🔥M1", "scalp": "⚡M5", "day": "📊M15", "trend": "🚀H1"}
 _TOTAL_STEPS = 11
 
 
@@ -153,12 +157,19 @@ def format_briefing(views, active: int, today: int) -> str:
 
     # symbols closest to a signal first - that is what needs attention
     for v in sorted(views, key=lambda x: -x.steps_passed):
+        style = _PROFILE_TAG.get(getattr(v, "profile", ""), "")
         lines.append("━━━━━━━━━━━━━━")
-        lines.append(f"📊 <b>{_esc(v.symbol)}</b>  @ <b>{_fmt(v.price, v.symbol)}</b>")
+        lines.append(f"📊 <b>{_esc(v.symbol)}</b> {style} @ <b>{_fmt(v.price, v.symbol)}</b>")
+        age = getattr(v, "data_age_min", 0.0)
+        if getattr(v, "data_stale", False):
+            lines.append(f"⚠️ <i>ข้อมูลช้า {age:.0f} นาที — ราคาอาจไม่ตรงกระดาน</i>")
+        elif age:
+            lines.append(f"<i>ข้อมูลอัปเดตเมื่อ {age:.0f} นาทีที่แล้ว</i>")
 
-        # --- trend across timeframes ---------------------------------
-        lines.append(f"แนวโน้ม: D1 {_trend(v.trend_d1)} | H4 {_trend(v.trend_h4)}")
-        lines.append(f"　　　　 H1 {_trend(v.trend_h1)} | เข้า {_trend(v.trend_entry)}")
+        # --- trend across this profile's own timeframe ladder ---------
+        t1, t2, t3, t4 = getattr(v, "tf_names", ("D1", "H4", "H1", "เข้า"))
+        lines.append(f"แนวโน้ม: {t1} {_trend(v.trend_d1)} | {t2} {_trend(v.trend_h4)}")
+        lines.append(f"　　　　 {t3} {_trend(v.trend_h1)} | {t4} {_trend(v.trend_entry)}")
         if v.direction:
             lines.append(f"ทิศทางที่ระบบมอง: <b>{'BUY' if v.direction > 0 else 'SELL'}</b>")
         else:

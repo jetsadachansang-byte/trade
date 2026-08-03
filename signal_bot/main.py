@@ -20,9 +20,8 @@ from . import data as market_data
 from . import notifier
 from .analyzer import analyse
 from .config import Settings
+from .profiles import resolve as resolve_profiles
 from .state import ACTIVE, CANCELLED, SL_HIT, State, Signal, TP1, TP2, TP3
-
-TIMEFRAMES = ["D1", "H4", "H1"]
 
 
 def in_kill_zone(cfg: Settings, now: datetime) -> bool:
@@ -48,11 +47,12 @@ def market_open(now: datetime) -> bool:
 
 def track_open_signals(state: State, tg: notifier.Telegram,
                        cfg: Settings, now: datetime,
-                       api_key: str) -> None:
+                       cache: market_data.Cache) -> None:
     """Update every live signal against the latest price of its symbol."""
     for sig in state.live():
         try:
-            df = market_data.load(sig.symbol, cfg.entry_timeframe, api_key)
+            # each signal is tracked on the timeframe it was issued from
+            df = cache.get(sig.symbol, sig.timeframe)
         except market_data.DataError as exc:
             print(f"track {sig.symbol}: {exc}")
             continue
@@ -87,22 +87,24 @@ def track_open_signals(state: State, tg: notifier.Telegram,
         # --- expiry: never reached TP1 within the window ---------------
         if sig.status == ACTIVE:
             age_hours = (now - sig.created_at()).total_seconds() / 3600
-            if cfg.signal_expiry_hours > 0 and age_hours >= cfg.signal_expiry_hours:
+            expiry = sig.expiry_hours or cfg.signal_expiry_hours
+            if expiry > 0 and age_hours >= expiry:
                 sig.status = CANCELLED
                 tg.send(notifier.format_cancel(
                     sig.symbol, sig.side,
-                    f"เกินเวลา {cfg.signal_expiry_hours} ชม. โดยไม่ถึง TP1", sig.id))
+                    f"เกินเวลา {expiry} ชม. โดยไม่ถึง TP1", sig.id))
 
 
 class Hold:
     """A qualifying setup held back by a rate limit (for the status report)."""
 
-    def __init__(self, symbol: str, detail: str):
+    def __init__(self, symbol: str, detail: str, profile: str = ""):
         self.symbol, self.stage, self.detail = symbol, "hold", detail
+        self.profile = profile
 
 
 def scan(state: State, tg: notifier.Telegram, cfg: Settings,
-         now: datetime) -> tuple[list, list[str], list]:
+         now: datetime, cache: market_data.Cache) -> tuple[list, list[str], list]:
     """Analyse the universe and issue any qualifying signals.
 
     Returns (rejections, errors, views) - views always covers every
@@ -115,46 +117,50 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
     in_cooldown = (cfg.cooldown_minutes > 0
                    and state.minutes_since_last(now) < cfg.cooldown_minutes)
     sent = 0
+    profiles = resolve_profiles(cfg.profiles)
 
     for symbol, tier in cfg.universe():
-        try:
-            frames = market_data.load_multi(
-                symbol, TIMEFRAMES + [cfg.entry_timeframe],
-                cfg.twelvedata_key, cfg.request_pause)
-        except market_data.DataError as exc:
-            errors.append(str(exc))
-            continue
+        for prof in profiles:
+            try:
+                frames = cache.frames(symbol, prof.timeframes())
+            except market_data.DataError as exc:
+                errors.append(str(exc))
+                continue
 
-        cand, rejection, view = analyse(symbol, tier, frames, cfg)
-        views.append(view)
-        if rejection:
-            rejections.append(rejection)
-            continue
-        run_full = (cfg.max_signals_per_run > 0 and sent >= cfg.max_signals_per_run)
-        same_bar = state.signalled_this_bar(symbol, cand.bar_time)
-        if run_full or cap_reached or in_cooldown or state.has_live(symbol) or same_bar:
-            # a qualifying setup we deliberately hold back this run
-            reason = ("ครบโควตาสัญญาณของรอบนี้" if run_full else
-                      "ครบโควตาสัญญาณของวันนี้" if cap_reached else
-                      "อยู่ในช่วง cooldown" if in_cooldown else
-                      "มีสัญญาณ active ของ symbol นี้อยู่แล้ว" if state.has_live(symbol) else
-                      "ส่งสัญญาณของแท่งนี้ไปแล้ว")
-            rejections.append(Hold(symbol, reason))
-            continue
+            cand, rejection, view = analyse(symbol, tier, frames, cfg, prof)
+            views.append(view)
+            if rejection:
+                rejections.append(rejection)
+                continue
+            run_full = (cfg.max_signals_per_run > 0
+                        and sent >= cfg.max_signals_per_run)
+            live = state.has_live(symbol, prof.name)
+            same_bar = state.signalled_this_bar(symbol, prof.name, cand.bar_time)
+            if run_full or cap_reached or in_cooldown or live or same_bar:
+                # a qualifying setup we deliberately hold back this run
+                reason = ("ครบโควตาสัญญาณของรอบนี้" if run_full else
+                          "ครบโควตาสัญญาณของวันนี้" if cap_reached else
+                          "อยู่ในช่วง cooldown" if in_cooldown else
+                          "มีสัญญาณ active ของสไตล์นี้อยู่แล้ว" if live else
+                          "ส่งสัญญาณของแท่งนี้ไปแล้ว")
+                rejections.append(Hold(symbol, reason, prof.name))
+                continue
 
-        signal_id = state.next_id(now)
-        state.signals.append(Signal(
-            id=signal_id, symbol=cand.symbol, tier=cand.tier, direction=cand.direction,
-            entry=cand.entry, entry_low=cand.entry_low, entry_high=cand.entry_high,
-            sl=cand.sl, tp1=cand.tp1, tp2=cand.tp2, tp3=cand.tp3,
-            rr=cand.rr, score=cand.score, timeframe=cand.timeframe,
-            created=now.isoformat(timespec="seconds"), bar_time=cand.bar_time,
-            reasons=list(cand.reasons),
-        ))
-        state.last_signal_at = now.isoformat(timespec="seconds")
-        tg.send(notifier.format_signal(cand, signal_id))
-        print(f"SIGNAL {symbol} {cand.side} score {cand.score}")
-        sent += 1
+            signal_id = state.next_id(now)
+            state.signals.append(Signal(
+                id=signal_id, symbol=cand.symbol, tier=cand.tier,
+                direction=cand.direction, entry=cand.entry,
+                entry_low=cand.entry_low, entry_high=cand.entry_high,
+                sl=cand.sl, tp1=cand.tp1, tp2=cand.tp2, tp3=cand.tp3,
+                rr=cand.rr, score=cand.score, timeframe=cand.timeframe,
+                profile=prof.name, expiry_hours=prof.expiry_hours,
+                created=now.isoformat(timespec="seconds"), bar_time=cand.bar_time,
+                reasons=list(cand.reasons),
+            ))
+            state.last_signal_at = now.isoformat(timespec="seconds")
+            tg.send(notifier.format_signal(cand, signal_id, prof))
+            print(f"SIGNAL [{prof.name}] {symbol} {cand.side} score {cand.score}")
+            sent += 1
 
     return rejections, errors, views
 
@@ -184,8 +190,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # tracking runs even outside kill zones - an open signal must be
     # followed to its conclusion whatever the hour
+    cache = market_data.Cache(cfg.twelvedata_key, cfg.request_pause)
     if market_open(now) or args.ignore_hours:
-        track_open_signals(state, tg, cfg, now, cfg.twelvedata_key)
+        track_open_signals(state, tg, cfg, now, cache)
     else:
         print("market closed - tracking skipped")
 
@@ -195,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     elif not (in_kill_zone(cfg, now) or args.ignore_hours):
         print(f"outside kill zones (UTC hour {now.hour}) - no scan")
     else:
-        rejections, errors, views = scan(state, tg, cfg, now)
+        rejections, errors, views = scan(state, tg, cfg, now, cache)
 
     # --- chart briefing: the running commentary on the market ---------
     due = (cfg.briefing_minutes > 0
@@ -215,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     for err in errors:
         print(f"data: {err}")
     print(f"done: {len(state.live())} live signal(s), "
-          f"{state.issued_today(now)} issued today")
+          f"{state.issued_today(now)} issued today · {cache.stats()}")
     return 0
 
 
