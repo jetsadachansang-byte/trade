@@ -104,6 +104,7 @@ class MarketView:
     score: float = 0.0
     data_age_min: float = 0.0        # how old the newest candle is
     data_stale: bool = False
+    price_note: str = ""             # set when the feed is not the spot market
     news_verified: bool = False      # False = calendar could not be reached
     news_note: str = ""
 
@@ -311,6 +312,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     view.tf_names = (prof.htf_major, prof.htf_mid, prof.htf_minor, entry_tf)
     view.price = float(entry_df["close"].iloc[-1])
     view.data_age_min, view.data_stale = freshness(entry_df, entry_tf)
+    view.price_note = entry_df.attrs.get("proxy_note", "")
     if news_ctx is not None:
         view.news_verified = news_ctx.verified()
         view.news_note = (news_ctx.notes[0] if news_ctx.notes else "")
@@ -533,6 +535,8 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         cand.risks.append(f"มีข่าวแรงใกล้เข้ามา: {soon.title} ({soon.currency})")
     if view.data_stale:
         cand.risks.append(f"ข้อมูลราคาช้า {view.data_age_min:.0f} นาที ตรวจราคาจริงก่อนเข้า")
+    if view.price_note:
+        cand.risks.append(f"{view.price_note} — เทียบราคากับกระดานก่อนตั้ง Entry/SL/TP")
 
     # --- news, only when it was actually verified ----------------------
     if news_ctx is not None and news_ctx.verified():
