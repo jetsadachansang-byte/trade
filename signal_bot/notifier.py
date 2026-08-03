@@ -17,6 +17,17 @@ class Telegram:
         self.dry_run = dry_run or not (token and chat_id)
 
     def send(self, text: str) -> bool:
+        """Send a message, splitting it if Telegram would reject the length.
+
+        Telegram caps a message at 4096 characters and answers anything
+        longer with "message is too long" - which is how the whole chart
+        briefing went missing. Splitting happens on line boundaries so no
+        HTML tag is ever cut in half.
+        """
+        chunks = _split(text)
+        return all(self._send_one(part) for part in chunks)
+
+    def _send_one(self, text: str) -> bool:
         """Send one HTML message. Prints instead of sending in dry-run mode."""
         if self.dry_run:
             print("--- TELEGRAM (dry run) ---")
@@ -44,6 +55,37 @@ class Telegram:
         elif resp.status_code == 403:
             print("  -> บอทถูกบล็อก หรือถูกเตะออกจากกลุ่ม")
         return False
+
+
+MAX_LEN = 4000            # Telegram's hard limit is 4096; leave headroom
+
+
+def _split(text: str, limit: int = MAX_LEN) -> list:
+    """Break a message into Telegram-sized parts on line boundaries.
+
+    A single line longer than the limit is hard-split as a last resort;
+    none of the formatters produce one, but a long error string could.
+    """
+    if len(text) <= limit:
+        return [text]
+    parts, current = [], ""
+    for line in text.split("\n"):
+        while len(line) > limit:
+            if current:
+                parts.append(current)
+                current = ""
+            parts.append(line[:limit])
+            line = line[limit:]
+        if not current:
+            current = line
+        elif len(current) + 1 + len(line) <= limit:
+            current += "\n" + line
+        else:
+            parts.append(current)
+            current = line
+    if current:
+        parts.append(current)
+    return parts
 
 
 def _esc(value) -> str:
@@ -207,13 +249,25 @@ def format_briefing(views, active: int, today: int, counts=None) -> str:
     short_views = [v for v in views if not _is_long_hold(getattr(v, "profile", ""))]
     long_views = [v for v in views if _is_long_hold(getattr(v, "profile", ""))]
 
-    for group, header in ((short_views, "⚡ <b>สายเก็บสั้น (Day Trade / Scalp)</b>"),
-                          (long_views, "🚀 <b>สายถือยาว (Run Trend)</b>")):
+    for group, header, top in ((short_views, "⚡ <b>สายเก็บสั้น (Day Trade / Scalp)</b>", 5),
+                               (long_views, "🚀 <b>สายถือยาว (Run Trend)</b>", 3)):
         if not group:
             continue
         lines.append("")
         lines.append(header)
-        lines.extend(_briefing_block(group))
+        # 8 symbols x 4 styles is far too much detail to read hourly, so
+        # only the ones closest to a signal get a full block; the rest are
+        # summarised one per line so nothing disappears silently
+        ranked = sorted(group, key=lambda x: -x.steps_passed)
+        lines.extend(_briefing_block(ranked[:top]))
+        rest = ranked[top:]
+        if rest:
+            lines.append("━━━━━━━━━━━━━━")
+            lines.append(f"<i>อีก {len(rest)} รายการที่ยังไม่ใกล้จุดเข้า:</i>")
+            for v in rest:
+                tag = _PROFILE_TAG.get(getattr(v, "profile", ""), "")
+                lines.append(f"• {_esc(v.symbol)} {tag} "
+                             f"{v.steps_passed}/{_TOTAL_STEPS} — {_esc(v.waiting)}")
 
     lines.append("━━━━━━━━━━━━━━")
     lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด — "
@@ -233,6 +287,8 @@ def _briefing_block(views) -> list:
             lines.append(f"⚠️ <i>ข้อมูลช้า {age:.0f} นาที — ราคาอาจไม่ตรงกระดาน</i>")
         elif age:
             lines.append(f"<i>ข้อมูลอัปเดตเมื่อ {age:.0f} นาทีที่แล้ว</i>")
+        if getattr(v, "price_note", ""):
+            lines.append(f"⚠️ <i>{_esc(v.price_note)}</i>")
 
         # --- trend across this profile's own timeframe ladder ---------
         t1, t2, t3, t4 = getattr(v, "tf_names", ("D1", "H4", "H1", "เข้า"))

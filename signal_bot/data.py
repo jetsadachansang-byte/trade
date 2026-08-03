@@ -33,16 +33,25 @@ TWELVEDATA_SYMBOLS = {
     "AUDJPY": "AUD/JPY", "CADJPY": "CAD/JPY", "CHFJPY": "CHF/JPY",
 }
 
+# Each symbol maps to the Yahoo tickers to try, in order of preference.
+# Yahoo's coverage of metals is inconsistent - XAUUSD=X returned HTTP 404
+# on every timeframe, which silently killed gold entirely - so the loader
+# walks the list instead of betting on one spelling.
 YAHOO_SYMBOLS = {
-    # spot gold, not the COMEX future - futures carry a basis of several
-    # dollars against spot, which showed up as "prices look wrong"
-    "XAUUSD": "XAUUSD=X",
-    "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X",
-    "USDCHF": "USDCHF=X", "AUDUSD": "AUDUSD=X", "NZDUSD": "NZDUSD=X",
-    "USDCAD": "USDCAD=X",
-    "EURJPY": "EURJPY=X", "GBPJPY": "GBPJPY=X", "EURGBP": "EURGBP=X",
-    "AUDJPY": "AUDJPY=X", "CADJPY": "CADJPY=X", "CHFJPY": "CHFJPY=X",
+    # spot gold first: the COMEX future carries a basis of several dollars
+    # against spot, which showed up as "prices look wrong". The future is
+    # kept only as a last resort, and its use is disclosed in the message.
+    "XAUUSD": ("XAUUSD=X", "XAU=X", "GC=F"),
+    "EURUSD": ("EURUSD=X",), "GBPUSD": ("GBPUSD=X",), "USDJPY": ("USDJPY=X",),
+    "USDCHF": ("USDCHF=X",), "AUDUSD": ("AUDUSD=X",), "NZDUSD": ("NZDUSD=X",),
+    "USDCAD": ("USDCAD=X",),
+    "EURJPY": ("EURJPY=X",), "GBPJPY": ("GBPJPY=X",), "EURGBP": ("EURGBP=X",),
+    "AUDJPY": ("AUDJPY=X",), "CADJPY": ("CADJPY=X",), "CHFJPY": ("CHFJPY=X",),
 }
+
+# Yahoo tickers whose prices are not the spot market. Falling back to one
+# beats having no data at all, but it must never pass unannounced.
+PROXY_SYMBOLS = {"GC=F": "ราคา COMEX futures ไม่ใช่ spot — อาจต่างจากกระดาน 2-10 จุด"}
 
 # --- timeframe translation --------------------------------------------
 TWELVEDATA_INTERVALS = {
@@ -101,12 +110,8 @@ def _from_twelvedata(symbol: str, timeframe: str, api_key: str,
     return df[["open", "high", "low", "close", "volume"]].dropna()
 
 
-def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
-    """Load OHLC from Yahoo Finance's chart endpoint (no API key)."""
-    yf_symbol = YAHOO_SYMBOLS.get(symbol)
-    if yf_symbol is None:
-        raise DataError(f"{symbol}: not mapped for Yahoo Finance")
-
+def _yahoo_one(yf_symbol: str, symbol: str, timeframe: str) -> pd.DataFrame:
+    """Fetch a single Yahoo ticker. Raises DataError on anything unusable."""
     resp = requests.get(
         _YF_URL.format(sym=yf_symbol), timeout=20,
         headers={"User-Agent": "Mozilla/5.0 (compatible; CapitalGuard/1.0)"},
@@ -114,14 +119,14 @@ def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
                 "range": YAHOO_PERIODS[timeframe]},
     )
     if not resp.ok:
-        raise DataError(f"{symbol} {timeframe}: HTTP {resp.status_code}")
+        raise DataError(f"{yf_symbol}: HTTP {resp.status_code}")
 
     chart = resp.json().get("chart", {})
     if chart.get("error"):
-        raise DataError(f"{symbol} {timeframe}: {chart['error']}")
+        raise DataError(f"{yf_symbol}: {chart['error']}")
     results = chart.get("result")
     if not results:
-        raise DataError(f"{symbol} {timeframe}: empty response")
+        raise DataError(f"{yf_symbol}: empty response")
 
     result = results[0]
     quote = result["indicators"]["quote"][0]
@@ -140,6 +145,34 @@ def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
             "close": "last", "volume": "sum",
         }).dropna()
     return df
+
+
+def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
+    """Load OHLC from Yahoo Finance's chart endpoint (no API key).
+
+    Tries each mapped ticker in preference order and returns the first that
+    yields enough bars, tagging the frame with the ticker that supplied it
+    so a non-spot fallback can be disclosed downstream.
+    """
+    candidates = YAHOO_SYMBOLS.get(symbol)
+    if not candidates:
+        raise DataError(f"{symbol}: not mapped for Yahoo Finance")
+
+    errors = []
+    for yf_symbol in candidates:
+        try:
+            df = _yahoo_one(yf_symbol, symbol, timeframe)
+        except Exception as exc:            # noqa: BLE001 - try the next ticker
+            errors.append(str(exc))
+            continue
+        if len(df) < MIN_BARS:
+            errors.append(f"{yf_symbol}: only {len(df)} bars")
+            continue
+        df.attrs["yahoo_symbol"] = yf_symbol
+        df.attrs["proxy_note"] = PROXY_SYMBOLS.get(yf_symbol, "")
+        return df
+
+    raise DataError(f"{symbol} {timeframe}: " + "; ".join(errors))
 
 
 def load(symbol: str, timeframe: str, api_key: Optional[str] = None) -> pd.DataFrame:
