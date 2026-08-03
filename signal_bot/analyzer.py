@@ -38,6 +38,7 @@ class Candidate:
     score: float
     timeframe: str
     profile: str = "day"           # trading style this setup belongs to
+    grade: str = "A"               # quality grade derived from the score
     hold_time: str = ""            # expected holding time
     bar_time: str = ""             # entry bar the setup formed on
     reasons: list[str] = field(default_factory=list)
@@ -109,6 +110,25 @@ class MarketView:
 
 def _clamp(value: float) -> float:
     return max(0.0, min(100.0, value))
+
+
+# Quality bands. A relaxed threshold can let a weaker setup through, so
+# the grade travels with the signal and drives the sizing advice.
+GRADES = ((90.0, "A+"), (85.0, "A"), (78.0, "B"), (0.0, "C"))
+
+GRADE_ADVICE = {
+    "A+": "คุณภาพสูงสุด — ขนาดไม้ปกติได้",
+    "A": "คุณภาพดี — ขนาดไม้ปกติได้",
+    "B": "คุณภาพปานกลาง — แนะนำลดขนาดไม้เหลือ 50-70%",
+    "C": "คุณภาพต่ำ (ผ่านเกณฑ์ที่ผ่อนแล้ว) — แนะนำลดขนาดไม้เหลือ 30-50% หรือข้ามไม้นี้",
+}
+
+
+def grade_for(score: float) -> str:
+    for cutoff, label in GRADES:
+        if score >= cutoff:
+            return label
+    return "C"
 
 
 def _decide_direction(d1: S.Structure, h4: S.Structure, h1: S.Structure) -> int:
@@ -266,7 +286,8 @@ def _score_spread(session: str, vol_state: str) -> float:
 
 def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
             cfg: Settings, prof: Profile, news_ctx=None,
-            session: str = "", in_kill_zone: bool = False
+            session: str = "", in_kill_zone: bool = False,
+            threshold_override: Optional[float] = None
             ) -> tuple[Optional[Candidate], Optional[Rejection], MarketView]:
     """Run the full SMC pipeline for one symbol.
 
@@ -425,8 +446,11 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     total = sum(parts[k] * weights.get(k, 0.0) for k in parts) / sum(weights.values())
 
     view.score = round(total, 1)
-    threshold = (cfg.number("SCORE_THRESHOLD", prof.score_threshold)
-                 + (cfg.tier3_extra if tier == 3 else 0.0))
+    base = cfg.number("SCORE_THRESHOLD", prof.score_threshold)
+    if threshold_override is not None:
+        # the adaptive bar may lower the requirement, never raise it
+        base = min(base, threshold_override)
+    threshold = base + (cfg.tier3_extra if tier == 3 else 0.0)
     if total < threshold:
         return reject("10-score", f"คะแนน {total:.1f} < {threshold:.0f}")
     view.steps_passed = 11
@@ -450,7 +474,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         tp2=r(price + sl_dist * prof.tp_r[1] if is_buy else price - sl_dist * prof.tp_r[1]),
         tp3=r(price + sl_dist * prof.tp_r[2] if is_buy else price - sl_dist * prof.tp_r[2]),
         rr=prof.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
-        profile=prof.name, hold_time=prof.hold_time,
+        profile=prof.name, grade=grade_for(total), hold_time=prof.hold_time,
         bar_time=str(entry_df.index[-2]),
     )
 
@@ -482,6 +506,10 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         cand.notes.append(prof.note)
 
     # --- what could invalidate this plan -------------------------------
+    if cand.grade in ("B", "C"):
+        cand.risks.append(
+            f"สัญญาณเกรด {cand.grade} — ผ่านเกณฑ์ที่ผ่อนลงเพื่อให้ครบเป้าหมายรายวัน "
+            f"ไม่ใช่ setup ระดับ A")
     opposite = "ต่ำกว่า" if is_buy else "สูงกว่า"
     cand.risks.append(f"ราคาปิด{opposite} SL ({cand.sl}) = โครงสร้างเสีย ต้องออก")
     if st_entry.recent_choch:
