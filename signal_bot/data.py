@@ -227,10 +227,15 @@ class Cache:
     """
 
     def __init__(self, api_key: Optional[str] = None, pause: float = 0.0,
-                 allow_proxy: bool = False):
+                 allow_proxy: bool = False, key_symbols=None):
         self.api_key = api_key
         self.pause = pause
         self.allow_proxy = allow_proxy
+        # Which symbols may spend the Twelve Data key. Its free plan allows
+        # 800 requests a day; letting all eight symbols use it would need
+        # roughly 16,000, so the key is reserved for the symbols Yahoo
+        # cannot serve (gold spot). None = no restriction.
+        self.key_symbols = set(key_symbols) if key_symbols is not None else None
         self._store: dict[tuple[str, str], pd.DataFrame] = {}
         self._errors: dict[tuple[str, str], str] = {}
         self.sources: dict[str, str] = {}       # symbol -> ticker actually used
@@ -241,8 +246,10 @@ class Cache:
             return self._store[key]
         if key in self._errors:                 # don't retry a known failure
             raise DataError(self._errors[key])
+        may_use_key = (self.key_symbols is None or symbol in self.key_symbols)
         try:
-            df = load(symbol, timeframe, self.api_key, self.allow_proxy)
+            df = load(symbol, timeframe,
+                      self.api_key if may_use_key else "", self.allow_proxy)
         except DataError as exc:
             self._errors[key] = str(exc)
             raise

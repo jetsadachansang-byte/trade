@@ -195,8 +195,19 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
     # among the short-term ones.
     short_batch, long_batch = [], []
 
+    # Gold spot comes from Twelve Data, which has a daily request budget,
+    # so it runs on a slower clock than the pairs instead of every scan.
+    gold_due = (cfg.gold_scan_minutes <= 0
+                or state.minutes_since_gold_scan(now) >= cfg.gold_scan_minutes)
+    if not gold_due:
+        print(f"gold: skipped this run "
+              f"(next in {cfg.gold_scan_minutes - state.minutes_since_gold_scan(now):.0f} min)")
+
     for symbol, tier in cfg.universe():
-        gap = gold_gap if cfg.is_gold(symbol) else pair_gap
+        is_gold = cfg.is_gold(symbol)
+        if is_gold and not gold_due:
+            continue
+        gap = gold_gap if is_gold else pair_gap
         for prof in profiles:
             try:
                 frames = cache.frames(symbol, prof.timeframes())
@@ -244,6 +255,9 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
                   f"score {cand.score} grade {cand.grade} (bar {bar:.0f})")
             sent += 1
 
+    if gold_due:
+        state.last_gold_scan_at = now.isoformat(timespec="seconds")
+
     _send_batches(tg, short_batch, long_batch)
     return rejections, errors, views
 
@@ -286,7 +300,10 @@ def main(argv: list[str] | None = None) -> int:
     # tracking runs even outside kill zones - an open signal must be
     # followed to its conclusion whatever the hour
     cache = market_data.Cache(cfg.twelvedata_key, cfg.request_pause,
-                              cfg.allow_gold_futures)
+                              cfg.allow_gold_futures, set(cfg.gold_symbols))
+    if cfg.gold_symbols and not cfg.twelvedata_key:
+        print("gold: no TWELVEDATA_API_KEY - Yahoo has no spot gold, "
+              "so gold will be skipped (see docs/MOBILE_SETUP_TH.md)")
     if market_open(now) or args.ignore_hours:
         track_open_signals(state, tg, cfg, now, cache)
     else:
