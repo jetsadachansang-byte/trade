@@ -11,12 +11,19 @@ on:
     #    ~6,300 นาที/เดือน — ถ้าไม่เปลี่ยน repo เป็น public จะเกินโควตา
     #    ราววันที่ 10 ของเดือน ดู docs/MOBILE_SETUP_TH.md หัวข้อโควตา
     - cron: "*/5 * * * 1-5"
-  workflow_dispatch:          # ปุ่มกดรันเองได้ทันทีจากมือถือ
+  # ปุ่มกดรันเองจากมือถือ และเป็นช่องทางที่ cron ภายนอกใช้เรียกด้วย
+  # (GitHub throttle ตาราง schedule ของ repo สาธารณะอย่างหนัก จริง ๆ
+  #  ได้ราว 3-4 ชม./ครั้ง ไม่ใช่ 5 นาที ดู docs/MOBILE_SETUP_TH.md)
+  #
+  # ⚠️ ค่า default ต้องเป็น false ทั้งหมด: เมื่อ cron ภายนอกยิงมาโดยไม่ส่ง
+  #    inputs GitHub จะเติม default ให้เอง ถ้าตั้ง true จะกลายเป็นส่ง
+  #    รายงานภาพรวมทุกรอบ (~288 ข้อความ/วัน) ตอนกดปุ่มเองยังติ๊กได้ตามปกติ
+  workflow_dispatch:
     inputs:
       status:
         description: "ส่งรายงานสถานะเข้า Telegram ด้วย"
         type: boolean
-        default: true
+        default: false
       ignore_hours:
         description: "ข้ามการเช็คเวลาตลาด/kill zone (สำหรับทดสอบ)"
         type: boolean
@@ -24,7 +31,7 @@ on:
       brief:
         description: "ส่งรายงานวิเคราะห์กราฟทันที (แนวโน้ม + โซนสำคัญ)"
         type: boolean
-        default: true
+        default: false
 
 # กันไม่ให้รันซ้อนกันจนสถานะสัญญาณเพี้ยน
 concurrency:
