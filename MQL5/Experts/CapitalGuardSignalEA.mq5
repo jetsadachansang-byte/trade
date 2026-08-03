@@ -1,32 +1,33 @@
 //+------------------------------------------------------------------+
 //|                                       CapitalGuardSignalEA.mq5   |
-//|  CapitalGuard Signal - SMC/ICT market analyst -> LINE OA         |
+//|  CapitalGuard Signal v2 - Multi-symbol SMC/ICT analyst -> LINE   |
 //|                                                                  |
-//|  This EA NEVER opens orders. It works as an institutional-style  |
-//|  market analyst running 24h while the market is open:            |
-//|   - analyses every tick, every timeframe (W1 D1 H4 H1 M30 M15)   |
-//|   - entry analysis on M5/M1                                      |
-//|   - SMC core: structure, liquidity, BOS/CHoCH/MSS, order block,  |
-//|     FVG, premium/discount, mitigation                            |
-//|   - ICT layer: weekly/daily bias, kill zones, OTE, session       |
-//|     analysis (PO3 is expressed as sweep->BOS sequence; SMT       |
-//|     divergence proxied by the optional DXY filter)               |
-//|   - indicators (EMA/VWAP/ATR/ADX/RSI/MACD/Volume) confirm only   |
-//|   - signals sent to LINE OA when confidence >= 90 ONLY           |
-//|   - tracks TP1/TP2/TP3/SL and cancellation, notifying via LINE   |
-//|   - on-chart + mobile (HTML) dashboard, CSV/JSONL logging        |
+//|  This EA NEVER opens orders. It analyses a prioritised universe  |
+//|  of liquid symbols and pushes only the highest-quality setups    |
+//|  (score >= 90) to a LINE Official Account:                       |
 //|                                                                  |
-//|  No signal for days is normal behaviour: quality over quantity.  |
+//|   Tier 1 (continuous, most resources): XAUUSD                    |
+//|   Tier 2 (every closed bar): EURUSD GBPUSD USDJPY USDCHF         |
+//|                              AUDUSD NZDUSD USDCAD                |
+//|   Tier 3 (stricter threshold): EURJPY GBPJPY EURGBP AUDJPY       |
+//|                                CADJPY CHFJPY                     |
+//|                                                                  |
+//|  When several setups appear in one cycle, the highest-priority   |
+//|  symbol wins (XAUUSD > EURUSD > GBPUSD > USDJPY > others).       |
+//|                                                                  |
+//|  Gold macro context: DXY / US yields / VIX trends (when the      |
+//|  broker offers those symbols). One conflicting factor lowers     |
+//|  the score; two or more suspends the signal.                     |
+//|                                                                  |
+//|  Attach to ONE chart only (ideally XAUUSD M5). No signal all     |
+//|  day is normal behaviour: quality over quantity.                 |
 //+------------------------------------------------------------------+
 #property copyright "CapitalGuard"
-#property version   "1.00"
+#property version   "2.00"
 
-#include <CapitalGuard\IndicatorSet.mqh>
-#include <CapitalGuard\MarketStructure.mqh>
-#include <CapitalGuard\SmartMoney.mqh>
-#include <CapitalGuard\Regime.mqh>
-#include <CapitalGuard\NewsFilter.mqh>
 #include <CapitalGuard\ScoringEngine.mqh>
+#include <CapitalGuard\SymbolAnalyst.mqh>
+#include <CapitalGuard\NewsFilter.mqh>
 #include <CapitalGuard\LineNotify.mqh>
 #include <CapitalGuard\SignalManager.mqh>
 
@@ -34,7 +35,15 @@
 input group             "=== General ==="
 input long              InpMagic            = 20260804;         // Instance id (log file names)
 input ENUM_TIMEFRAMES   InpEntryTF          = PERIOD_M5;        // Entry analysis timeframe (M1/M5)
+input int               InpScanSeconds      = 15;               // Scan cycle (seconds)
 input int               InpMaxSpreadPoints  = 45;               // Max spread to signal (points)
+
+//--- Inputs: Symbol universe (edit names to match your broker) ----------
+input group             "=== Symbols (priority order) ==="
+input string            InpTier1Symbols     = "XAUUSD";                                          // Tier 1: continuous
+input string            InpTier2Symbols     = "EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"; // Tier 2: majors
+input string            InpTier3Symbols     = "EURJPY,GBPJPY,EURGBP,AUDJPY,CADJPY,CHFJPY";        // Tier 3: crosses
+input double            InpTier3Extra       = 2.0;              // Tier 3 threshold add-on (stricter)
 
 //--- Inputs: LINE Official Account --------------------------------------
 input group             "=== LINE OA ==="
@@ -45,7 +54,7 @@ input string            InpLineUserId       = "";               // Target userId
 //--- Inputs: Signal issuing ---------------------------------------------
 input group             "=== Signals ==="
 input double            InpScoreThreshold   = 90.0;             // Min confidence score (0-100)
-input int               InpMaxSignalsPerDay = 3;                // Max signals per day
+input int               InpMaxSignalsPerDay = 3;                // Max signals per day (all symbols)
 input int               InpCooldownMinutes  = 60;               // Min minutes between signals
 input int               InpSignalExpiryHrs  = 12;               // Cancel if TP1 not reached (hours)
 input double            InpTP1R             = 1.0;              // TP1 distance (R multiples)
@@ -85,6 +94,13 @@ input int               InpLondonKZEnd      = 12;               // London KZ end
 input int               InpNYKZStart        = 15;               // New York KZ start hour (server)
 input int               InpNYKZEnd          = 18;               // New York KZ end hour (server)
 input bool              InpReqOTE           = false;            // Require OTE zone (0.62-0.79 pullback)
+
+//--- Inputs: Gold macro context (broker symbol names; "" = skip) --------
+input group             "=== Gold Macro Context ==="
+input string            InpDxySymbol        = "";               // Dollar index symbol (e.g. USDX)
+input string            InpYieldSymbol      = "";               // US yield/bond proxy symbol
+input string            InpVixSymbol        = "";               // VIX symbol (e.g. VIX)
+input double            InpMacroPenalty     = 5.0;              // Score penalty per single conflict
 
 //--- Inputs: Indicators (confirmation only) -----------------------------
 input group             "=== Indicators (confirmation only) ==="
@@ -130,13 +146,8 @@ input group             "=== News Filter ==="
 input bool              InpNewsEnabled      = true;             // Enable news filter
 input int               InpNewsPreMin       = 45;               // Block before news (minutes)
 input int               InpNewsPostMin      = 45;               // Block after news (minutes)
-input string            InpNewsCurrencies   = "USD";            // Currencies to watch (comma list)
+input string            InpNewsCurrencies   = "USD,EUR,GBP,JPY,CHF,AUD,NZD,CAD"; // Currencies watched
 input string            InpNewsManualTimes  = "";               // Manual blocks "yyyy.mm.dd hh:mi;..."
-
-//--- Inputs: External correlation (SMT proxy, optional) -----------------
-input group             "=== Correlation / SMT (optional) ==="
-input bool              InpUseDxyFilter     = false;            // Veto when DXY trends WITH direction
-input string            InpDxySymbol        = "";               // Broker's dollar-index symbol
 
 //--- Inputs: Dashboard --------------------------------------------------
 input group             "=== Dashboard ==="
@@ -146,69 +157,112 @@ input bool              InpWriteWebDash     = true;             // Write mobile 
 input int               InpWebDashSecs      = 60;               // HTML dashboard refresh (seconds)
 
 //--- Module instances ---------------------------------------------------
-CIndicatorSet     indH1, indM30, indM15, indEntry;
-CMarketStructure  structW1, structD1, structH4, structH1, structEntry;
-CSmartMoney       smartMoney;
-CRegimeDetector   regimeDetector;
-CNewsFilter       news;
 CScoringEngine    scoring;
+CNewsFilter       news;
 CLineNotify       line;
 CSignalManager    signalMgr;
+CSymbolAnalyst   *g_analysts[];      // priority-ordered analyst pool
 
 //--- Runtime state ------------------------------------------------------
-datetime          g_lastBarTime   = 0;
 datetime          g_lastSignalAt  = 0;
 datetime          g_lastDashAt    = 0;
 datetime          g_lastWebDashAt = 0;
-SSignal           g_lastEval;
-SRegimeInfo       g_regime;
-SStructureInfo    g_stW1, g_stD1, g_stH4, g_stH1, g_stEntry;
-string            g_newsStatus  = "";
-string            g_status      = "starting";
-string            g_lastSkipMsg = "";
+string            g_newsStatus    = "";
+string            g_status        = "starting";
+
+//+------------------------------------------------------------------+
+//| Build the shared analyst configuration from inputs               |
+//+------------------------------------------------------------------+
+void BuildConfig(SAnalystConfig &cfg)
+  {
+   cfg.entryTF        = InpEntryTF;
+   cfg.emaFast        = InpEmaFast;   cfg.emaMid = InpEmaMid;   cfg.emaSlow = InpEmaSlow;
+   cfg.rsiPeriod      = InpRsiPeriod; cfg.atrPeriod = InpAtrPeriod;
+   cfg.adxPeriod      = InpAdxPeriod; cfg.bbPeriod = InpBBPeriod; cfg.bbDev = InpBBDev;
+   cfg.swingBars      = InpSwingBars; cfg.structLookback = InpStructLookback;
+   cfg.smcWindow      = InpSmcWindow;
+   cfg.adxTrendMin    = InpAdxTrendMin; cfg.highVolRatio = InpHighVolRatio;
+   cfg.lowVolRatio    = InpLowVolRatio; cfg.atrAvgBars = InpAtrAvgBars;
+   cfg.atrMultSL      = InpAtrMultSL; cfg.maxSLAtrMult = InpMaxSLAtrMult;
+   cfg.minSLAtrMult   = InpMinSLAtrMult;
+   cfg.allowCounterTrend  = InpAllowCounterTrend;
+   cfg.reqLiquidityTarget = InpReqLiquidityTarget;
+   cfg.reqBosChoch    = InpReqBosChoch;
+   cfg.reqOrderBlock  = InpReqOrderBlock;   cfg.minOBQuality = InpMinOBQuality;
+   cfg.reqFVG         = InpReqFVG;          cfg.reqSweep = InpReqSweep;
+   cfg.reqPremiumDiscount = InpReqPremiumDiscount; cfg.discountMax = InpDiscountMax;
+   cfg.reqMitigation  = InpReqMitigation;   cfg.reqTrendConfirm = InpReqTrendConfirm;
+   cfg.reqWeeklyBias  = InpReqWeeklyBias;   cfg.reqOTE = InpReqOTE;
+   cfg.tp1R = InpTP1R; cfg.tp2R = InpTP2R; cfg.tp3R = InpTP3R;
+   cfg.maxSpreadPoints = InpMaxSpreadPoints;
+  }
+
+//+------------------------------------------------------------------+
+//| Create analysts for one comma-separated symbol list              |
+//+------------------------------------------------------------------+
+void AddTier(const string list, const int tier, const SAnalystConfig &cfg)
+  {
+   string parts[];
+   int n = StringSplit(list, ',', parts);
+   for(int i = 0; i < n; i++)
+     {
+      string sym = parts[i];
+      StringTrimLeft(sym); StringTrimRight(sym);
+      if(sym == "") continue;
+      if(!SymbolSelect(sym, true))
+        {
+         PrintFormat("CapitalGuard Signal: symbol %s not found at this broker - skipped "
+                     "(edit the tier lists to match your broker's names)", sym);
+         continue;
+        }
+      CSymbolAnalyst *a = new CSymbolAnalyst();
+      if(!a.Init(sym, tier, cfg))
+        {
+         PrintFormat("CapitalGuard Signal: failed to init analyst for %s - skipped", sym);
+         delete a;
+         continue;
+        }
+      int k = ArraySize(g_analysts);
+      ArrayResize(g_analysts, k + 1);
+      g_analysts[k] = a;
+     }
+  }
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
 int OnInit()
   {
-   bool ok = true;
-   ok &= indH1.Init(_Symbol, PERIOD_H1, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
-   ok &= indM30.Init(_Symbol, PERIOD_M30, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
-   ok &= indM15.Init(_Symbol, PERIOD_M15, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
-   ok &= indEntry.Init(_Symbol, InpEntryTF, InpEmaFast, InpEmaMid, InpEmaSlow, InpRsiPeriod, InpAtrPeriod, InpAdxPeriod, InpBBPeriod, InpBBDev);
-   if(!ok)
+   scoring.Init(InpWeightStructure, InpWeightLiquidity, InpWeightBosChoch,
+                InpWeightOB, InpWeightFVG, InpWeightVolume, InpWeightIndicator);
+   news.Init(InpNewsEnabled, InpNewsPreMin, InpNewsPostMin, InpNewsCurrencies, InpNewsManualTimes);
+   line.Init(InpLineEnabled, InpLineToken, InpLineUserId);
+   signalMgr.Init(GetPointer(line), InpMagic, InpSignalExpiryHrs);
+
+   //--- build the prioritised analyst pool (tier order = send order)
+   SAnalystConfig cfg;
+   BuildConfig(cfg);
+   ArrayResize(g_analysts, 0);
+   AddTier(InpTier1Symbols, 1, cfg);
+   AddTier(InpTier2Symbols, 2, cfg);
+   AddTier(InpTier3Symbols, 3, cfg);
+   if(ArraySize(g_analysts) == 0)
      {
-      Print("CapitalGuard Signal: failed to create indicator handles");
+      Print("CapitalGuard Signal: no valid symbols - check the tier lists");
       return(INIT_FAILED);
      }
 
-   //--- structure on every analysed timeframe (Weekly down to entry)
-   structW1.Init(_Symbol, PERIOD_W1, InpSwingBars, InpStructLookback);
-   structD1.Init(_Symbol, PERIOD_D1, InpSwingBars, InpStructLookback);
-   structH4.Init(_Symbol, PERIOD_H4, InpSwingBars, InpStructLookback);
-   structH1.Init(_Symbol, PERIOD_H1, InpSwingBars, InpStructLookback);
-   structEntry.Init(_Symbol, InpEntryTF, InpSwingBars, InpStructLookback);
+   //--- macro context symbols (optional)
+   if(InpDxySymbol != "")   SymbolSelect(InpDxySymbol, true);
+   if(InpYieldSymbol != "") SymbolSelect(InpYieldSymbol, true);
+   if(InpVixSymbol != "")   SymbolSelect(InpVixSymbol, true);
 
-   smartMoney.Init(_Symbol, InpEntryTF, InpSmcWindow);
-   regimeDetector.Init(InpAdxTrendMin, InpHighVolRatio, InpLowVolRatio, InpAtrAvgBars);
-   news.Init(InpNewsEnabled, InpNewsPreMin, InpNewsPostMin, InpNewsCurrencies, InpNewsManualTimes);
-   scoring.Init(InpWeightStructure, InpWeightLiquidity, InpWeightBosChoch,
-                InpWeightOB, InpWeightFVG, InpWeightVolume, InpWeightIndicator);
-   line.Init(InpLineEnabled, InpLineToken, InpLineUserId);
-   signalMgr.Init(GetPointer(line), _Symbol, InpMagic, InpSignalExpiryHrs);
+   //--- scan clock (analysis is timer-driven so all symbols are
+   //--- covered even when the chart symbol is quiet)
+   EventSetTimer(MathMax(5, InpScanSeconds));
 
-   if(InpUseDxyFilter && InpDxySymbol != "")
-      SymbolSelect(InpDxySymbol, true);
-
-   g_lastEval.direction = 0;
-   g_lastEval.total     = 0.0;
-   g_stEntry.bias       = 0;
-   g_stEntry.recentBOS  = false;
-   g_stEntry.recentCHoCH = false;
-
-   line.Push("🤖 CapitalGuard Signal เริ่มทำงาน\n" + _Symbol + " | เฝ้าตลาดตลอดเวลา ส่งเฉพาะสัญญาณคะแนน >= " +
-             DoubleToString(InpScoreThreshold, 0));
+   line.Push(StringFormat("🤖 CapitalGuard Signal เริ่มทำงาน\nวิเคราะห์ %d สินทรัพย์ (Tier1: %s)\nส่งเฉพาะสัญญาณคะแนน >= %.0f",
+                          ArraySize(g_analysts), InpTier1Symbols, InpScoreThreshold));
    return(INIT_SUCCEEDED);
   }
 
@@ -217,23 +271,25 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   indH1.Release(); indM30.Release(); indM15.Release(); indEntry.Release();
+   EventKillTimer();
+   for(int i = 0; i < ArraySize(g_analysts); i++)
+     {
+      if(CheckPointer(g_analysts[i]) == POINTER_DYNAMIC)
+        {
+         g_analysts[i].Release();
+         delete g_analysts[i];
+        }
+     }
+   ArrayResize(g_analysts, 0);
    Comment("");
   }
 
 //+------------------------------------------------------------------+
-//| Expert tick: monitor signals + analyse for new setups            |
+//| Chart ticks: track live signals + refresh dashboards             |
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-   //--- 1) tick-level lifecycle of live signals (TP/SL/cancel)
-   signalMgr.Monitor(bid, ask, g_stEntry);
-
-   //--- 2) dashboards (throttled)
-   regimeDetector.Detect(indH1, g_regime);
+   signalMgr.Monitor();
    if(InpShowDashboard && TimeCurrent() - g_lastDashAt >= InpDashboardSecs)
      {
       g_lastDashAt = TimeCurrent();
@@ -244,32 +300,19 @@ void OnTick()
       g_lastWebDashAt = TimeCurrent();
       WriteWebDashboard();
      }
-
-   //--- 3) full SMC analysis once per closed entry-TF bar
-   if(!IsNewBar())
-      return;
-   structW1.Scan(g_stW1);
-   structD1.Scan(g_stD1);
-   structH4.Scan(g_stH4);
-   structH1.Scan(g_stH1);
-   structEntry.Scan(g_stEntry);
-   TryAnalyse();
   }
 
 //+------------------------------------------------------------------+
-//| New bar detection on the entry timeframe                         |
+//| Scan clock: analyse the whole universe by priority               |
 //+------------------------------------------------------------------+
-bool IsNewBar()
+void OnTimer()
   {
-   datetime t = iTime(_Symbol, InpEntryTF, 0);
-   if(t == g_lastBarTime || t == 0)
-      return(false);
-   g_lastBarTime = t;
-   return(true);
+   signalMgr.Monitor();     // also track while the chart symbol is quiet
+   ScanUniverse();
   }
 
 //+------------------------------------------------------------------+
-//| Session name; "Overlap" when both London and NY are active       |
+//| Session name (global gate)                                       |
 //+------------------------------------------------------------------+
 string CurrentSessionName()
   {
@@ -299,21 +342,11 @@ bool InKillZone()
   }
 
 //+------------------------------------------------------------------+
-//| ICT OTE: price pulled back 62-79% of the last swing leg          |
-//+------------------------------------------------------------------+
-bool InOTEZone(const int dir, const double rangePos)
-  {
-   //--- rangePos 0=swing low, 1=swing high. A 62-79% pullback of an
-   //--- up-leg puts price at 0.21-0.38 of the range (discount OTE).
-   if(dir > 0)  return(rangePos >= 0.21 && rangePos <= 0.38);
-   return(rangePos >= 0.62 && rangePos <= 0.79);
-  }
-
-//+------------------------------------------------------------------+
-//| Simple external-symbol trend (SMT/DXY proxy)                     |
+//| Simple external-symbol trend (SMA20 vs SMA50 on H1)              |
 //+------------------------------------------------------------------+
 int ExternalTrendDir(const string sym)
   {
+   if(sym == "") return(0);
    double closes[];
    if(CopyClose(sym, PERIOD_H1, 1, 50, closes) < 50)
       return(0);
@@ -329,41 +362,33 @@ int ExternalTrendDir(const string sym)
   }
 
 //+------------------------------------------------------------------+
-//| SL distance from structure swings + ATR bounds                   |
+//| Gold macro context: count factors conflicting with `dir`.        |
+//| DXY or yields trending WITH gold direction = conflict            |
+//| (gold is inversely driven by both). VIX falling while buying     |
+//| gold = risk-on headwind. Missing symbols are simply skipped.     |
 //+------------------------------------------------------------------+
-double ComputeSLDistance(const int direction, const double refPrice)
+int GoldMacroConflicts(const int dir, string &desc)
   {
-   double atr = indEntry.Atr(1);
-   if(atr == EMPTY_VALUE || atr <= 0.0)
-      return(0.0);
-   double buffer  = atr * 0.3;
-   double slLevel = (direction > 0) ? structEntry.BuyStopLevel(g_stEntry, buffer)
-                                    : structEntry.SellStopLevel(g_stEntry, buffer);
-   double dist = 0.0;
-   if(slLevel > 0.0)
-      dist = (direction > 0) ? (refPrice - slLevel) : (slLevel - refPrice);
-   if(dist <= 0.0)
-      dist = atr * InpAtrMultSL;
-   dist = MathMax(dist, atr * InpMinSLAtrMult);
-   dist = MathMin(dist, atr * InpMaxSLAtrMult);
-   return(dist);
+   int conflicts = 0;
+   desc = "";
+   int dxy = ExternalTrendDir(InpDxySymbol);
+   if(dxy != 0 && dxy == dir)
+     { conflicts++; desc += "DXY trending with gold; "; }
+   int yld = ExternalTrendDir(InpYieldSymbol);
+   if(yld != 0 && yld == dir)
+     { conflicts++; desc += "US yields trending with gold; "; }
+   int vix = ExternalTrendDir(InpVixSymbol);
+   if(vix != 0 && vix == -dir)
+     { conflicts++; desc += "VIX against gold flow; "; }
+   return(conflicts);
   }
 
 //+------------------------------------------------------------------+
-//| Record a failed analysis stage (status + de-duplicated)          |
+//| One full priority-ordered scan of the symbol universe           |
 //+------------------------------------------------------------------+
-void FailStage(const string what)
+void ScanUniverse()
   {
-   g_status = "waiting: " + what;
-   g_lastSkipMsg = what;
-  }
-
-//+------------------------------------------------------------------+
-//| Full analysis: admin gates -> SMC pipeline -> ICT -> signal      |
-//+------------------------------------------------------------------+
-void TryAnalyse()
-  {
-   //--- administrative gates -----------------------------------------
+   //--- global gates first (shared by all symbols) -------------------
    string session = CurrentSessionName();
    if(session == "")
      { g_status = "outside analysed sessions"; return; }
@@ -372,161 +397,81 @@ void TryAnalyse()
    if(news.IsBlocked(g_newsStatus))
      { g_status = "news pause: " + g_newsStatus; return; }
    g_newsStatus = "";
-   long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(spread > InpMaxSpreadPoints)
-     { g_status = StringFormat("spread too high (%d pts)", (int)spread); return; }
-   if(signalMgr.HasActiveSignal())
-     { g_status = "signal already active - tracking it"; return; }
    datetime dayStart = iTime(_Symbol, PERIOD_D1, 0);
-   if(InpMaxSignalsPerDay > 0 && signalMgr.SignalsSince(dayStart) >= InpMaxSignalsPerDay)
-     { g_status = "daily signal cap reached"; return; }
-   if(g_lastSignalAt > 0 && TimeCurrent() - g_lastSignalAt < (long)InpCooldownMinutes * 60)
-     { g_status = "cooldown between signals"; return; }
+   bool capReached  = (InpMaxSignalsPerDay > 0 &&
+                       signalMgr.SignalsSince(dayStart) >= InpMaxSignalsPerDay);
+   bool inCooldown  = (g_lastSignalAt > 0 &&
+                       TimeCurrent() - g_lastSignalAt < (long)InpCooldownMinutes * 60);
 
-   //--- STEP 1: Market Structure + Weekly/Daily bias -----------------
-   int dir = scoring.DecideDirection(g_stD1, g_stH4, g_stH1);
-   if(dir == 0 && InpAllowCounterTrend && g_stH1.recentCHoCH && g_stH1.bias != 0)
-      dir = g_stH1.bias;
-   if(dir == 0)
-     { g_status = "structure unclear or HTF conflict - waiting"; return; }
-   //--- ICT weekly bias must not oppose
-   if(InpReqWeeklyBias)
+   //--- analyse in priority order; first passing candidate is sent ---
+   bool sent      = false;
+   int  candidates = 0;
+   for(int i = 0; i < ArraySize(g_analysts); i++)
      {
-      int w = (g_stW1.trend == MS_UPTREND) ? 1 : (g_stW1.trend == MS_DOWNTREND) ? -1 : 0;
-      if(w != 0 && w != dir)
-        { FailStage("weekly bias opposing"); return; }
-     }
-   bool isBuy = (dir > 0);
+      CSymbolAnalyst *a = g_analysts[i];
+      //--- Tier 1 is re-analysed every cycle; others on new bars only
+      bool force = (a.Tier() == 1);
+      double threshold = InpScoreThreshold + (a.Tier() == 3 ? InpTier3Extra : 0.0);
 
-   //--- STEP 2: Liquidity map ----------------------------------------
-   double atr = indEntry.Atr(1);
-   SSmcAnalysis smc;
-   if(!smartMoney.Scan(g_stEntry, atr == EMPTY_VALUE ? 0.0 : atr, smc))
-     { FailStage("liquidity scan failed"); return; }
-   if(InpReqLiquidityTarget && !(isBuy ? smc.bslAbovePrice : smc.sslBelowPrice))
-     { FailStage("no liquidity pool in profit direction"); return; }
+      SSignalCandidate c;
+      bool got = a.Analyse(force, scoring, threshold, c);
 
-   //--- STEP 3+4: BOS / CHoCH ----------------------------------------
-   if(InpReqBosChoch)
-     {
-      bool broke = (g_stEntry.bias == dir && (g_stEntry.recentBOS || g_stEntry.recentCHoCH));
-      if(!broke) { FailStage("no BOS/CHoCH in direction"); return; }
-     }
+      //--- structure may have flipped: check live signals of this symbol
+      SStructureInfo st;
+      a.EntryStructure(st);
+      signalMgr.CheckInvalidation(a.Symbol(), st);
 
-   //--- STEP 5: Order Block ------------------------------------------
-   SOrderBlock ob;
-   if(isBuy) ob = smc.obBull; else ob = smc.obBear;
-   if(InpReqOrderBlock)
-     {
-      if(!ob.valid) { FailStage("no valid order block"); return; }
-      if(ob.quality < InpMinOBQuality)
-        { FailStage(StringFormat("OB quality %.0f < %.0f", ob.quality, InpMinOBQuality)); return; }
-     }
+      if(got) candidates++;
+      if(!got || sent || capReached || inCooldown)
+         continue;
+      if(signalMgr.HasActiveSignal(c.symbol))
+         continue;                       // never stack signals per symbol
 
-   //--- STEP 6: Fair Value Gap ---------------------------------------
-   if(InpReqFVG && !(isBuy ? smc.fvgBull : smc.fvgBear))
-     { FailStage("no FVG in direction"); return; }
+      //--- gold macro context (Tier 1 only)
+      if(c.tier == 1)
+        {
+         string mdesc = "";
+         int conflicts = GoldMacroConflicts(c.dir, mdesc);
+         if(conflicts >= 2)
+           {
+            g_status = "macro conflict - signal suspended (" + mdesc + ")";
+            continue;
+           }
+         if(conflicts == 1)
+           {
+            c.score -= InpMacroPenalty;
+            if(c.score < threshold)
+              {
+               g_status = "macro penalty dropped score below threshold";
+               continue;
+              }
+            c.notes += "\n• ⚠️ ปัจจัยมหภาคขัดแย้งบางส่วน: " + mdesc;
+           }
+        }
 
-   //--- STEP 7: Liquidity Sweep --------------------------------------
-   if(InpReqSweep && !(isBuy ? smc.sweepBull : smc.sweepBear))
-     { FailStage("no liquidity sweep yet"); return; }
-
-   //--- STEP 8: Premium / Discount + ICT OTE -------------------------
-   if(InpReqPremiumDiscount)
-     {
-      if(isBuy && smc.rangePos > InpDiscountMax)
-        { FailStage(StringFormat("price in premium (%.2f)", smc.rangePos)); return; }
-      if(!isBuy && smc.rangePos < 1.0 - InpDiscountMax)
-        { FailStage(StringFormat("price in discount (%.2f)", smc.rangePos)); return; }
-     }
-   bool ote = InOTEZone(dir, smc.rangePos);
-   if(InpReqOTE && !ote)
-     { FailStage("not in OTE zone (0.62-0.79 pullback)"); return; }
-
-   //--- STEP 9: Mitigation -------------------------------------------
-   if(InpReqMitigation)
-     {
-      bool mitigating = (ob.valid && ob.mitigating) ||
-                        (isBuy ? smc.fvgBullMitigated : smc.fvgBearMitigated);
-      if(!mitigating) { FailStage("price not mitigating OB/FVG yet"); return; }
+      //--- send it (highest-priority symbol wins this cycle)
+      signalMgr.NewSignal(c);
+      g_lastSignalAt = TimeCurrent();
+      g_status = StringFormat("SIGNAL SENT: %s %s score %.1f",
+                              c.symbol, c.dir > 0 ? "BUY" : "SELL", c.score);
+      Print("CapitalGuard Signal: ", g_status);
+      sent = true;   // keep looping so remaining symbols still refresh
      }
 
-   //--- STEP 10: Confirmation ----------------------------------------
-   if(InpReqTrendConfirm)
+   //--- summarise this cycle for the dashboards
+   if(!sent)
      {
-      if(indM30.TrendDirection() == -dir || indM15.TrendDirection() == -dir)
-        { FailStage("lower timeframe opposing"); return; }
+      if(capReached)
+         g_status = StringFormat("daily signal cap reached (%d) - waiting for tomorrow",
+                                 InpMaxSignalsPerDay);
+      else if(inCooldown)
+         g_status = StringFormat("cooldown %d min between signals", InpCooldownMinutes);
+      else if(candidates > 0)
+         g_status = "candidate found but a signal is already active on that symbol";
+      else
+         g_status = StringFormat("scanning %d symbols - no qualifying setup yet",
+                                 ArraySize(g_analysts));
      }
-   if(InpUseDxyFilter && InpDxySymbol != "")
-     {
-      int dxy = ExternalTrendDir(InpDxySymbol);
-      if(dxy != 0 && dxy == dir)
-        { FailStage("SMT/DXY veto: dollar trending with direction"); return; }
-     }
-
-   //--- SL / TP plan --------------------------------------------------
-   double refPrice = isBuy ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
-                           : SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double slDist = ComputeSLDistance(dir, refPrice);
-   if(slDist <= 0.0) { FailStage("cannot compute SL distance"); return; }
-
-   //--- confidence score ---------------------------------------------
-   SScoreContext ctx;
-   ctx.smc       = smc;
-   ctx.plannedRR = InpTP2R;
-   ctx.session   = session;
-   scoring.Evaluate(dir, g_stD1, g_stH4, g_stH1, g_stEntry, indEntry, indH1, ctx, g_lastEval);
-   if(g_lastEval.total < InpScoreThreshold)
-     {
-      g_status = StringFormat("score %.1f < %.1f - waiting", g_lastEval.total, InpScoreThreshold);
-      return;
-     }
-
-   //--- build the signal ---------------------------------------------
-   int    digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   double entry  = refPrice;
-   double sl     = isBuy ? NormalizeDouble(entry - slDist, digits)
-                         : NormalizeDouble(entry + slDist, digits);
-   double tp1    = isBuy ? NormalizeDouble(entry + slDist * InpTP1R, digits)
-                         : NormalizeDouble(entry - slDist * InpTP1R, digits);
-   double tp2    = isBuy ? NormalizeDouble(entry + slDist * InpTP2R, digits)
-                         : NormalizeDouble(entry - slDist * InpTP2R, digits);
-   double tp3    = isBuy ? NormalizeDouble(entry + slDist * InpTP3R, digits)
-                         : NormalizeDouble(entry - slDist * InpTP3R, digits);
-
-   //--- reasons exactly per the required format + ICT extras
-   string reasons = "";
-   if(g_stEntry.recentBOS)    reasons += "• BOS ✔\n";
-   if(g_stEntry.recentCHoCH)  reasons += "• CHoCH ✔\n";
-   if(isBuy ? smc.sweepBull : smc.sweepBear)   reasons += "• Liquidity Sweep ✔\n";
-   if(ob.valid)               reasons += StringFormat("• Order Block ✔ (คุณภาพ %.0f)\n", ob.quality);
-   if(isBuy ? smc.fvgBull : smc.fvgBear)       reasons += "• FVG ✔";
-   if(isBuy ? smc.fvgBullMitigated : smc.fvgBearMitigated) reasons += " (mitigated)";
-   reasons += "\n";
-   reasons += "• Trend Confirmation ✔ (W1/D1/H4/H1 aligned)\n";
-   reasons += StringFormat("• %s ✔ | Kill Zone %s | rangePos %.2f",
-                           isBuy ? "Discount Zone" : "Premium Zone",
-                           InKillZone() ? "✔" : "-", smc.rangePos);
-   if(ote) reasons += " | OTE ✔";
-
-   string tfName = EnumToString(InpEntryTF);
-   StringReplace(tfName, "PERIOD_", "");
-
-   signalMgr.NewSignal(dir, entry, sl, tp1, tp2, tp3, InpTP2R,
-                       g_lastEval.total, reasons, tfName);
-   g_lastSignalAt = TimeCurrent();
-   g_status = StringFormat("SIGNAL SENT: %s score %.1f", isBuy ? "BUY" : "SELL", g_lastEval.total);
-   Print("CapitalGuard Signal: ", g_status);
-  }
-
-//+------------------------------------------------------------------+
-//| Trend label helper for dashboards                                |
-//+------------------------------------------------------------------+
-string TrendLabel(const SStructureInfo &st)
-  {
-   if(st.trend == MS_UPTREND)   return("UP");
-   if(st.trend == MS_DOWNTREND) return("DOWN");
-   return("SIDE");
   }
 
 //+------------------------------------------------------------------+
@@ -540,25 +485,25 @@ void DrawChartDashboard()
    datetime dayStart = iTime(_Symbol, PERIOD_D1, 0);
 
    string text = "\n";
-   text += "====== CAPITAL GUARD SIGNAL (no auto-trade) ======\n";
-   text += StringFormat("  Market: %s | Session: %s | KillZone: %s\n",
-                        _Symbol, CurrentSessionName() == "" ? "closed hrs" : CurrentSessionName(),
-                        InKillZone() ? "YES" : "no");
-   text += StringFormat("  Bias  W1:%s D1:%s H4:%s H1:%s | Regime: %s %s\n",
-                        TrendLabel(g_stW1), TrendLabel(g_stD1), TrendLabel(g_stH4), TrendLabel(g_stH1),
-                        CRegimeDetector::RegimeName(g_regime.regime),
-                        CRegimeDetector::VolName(g_regime.vol));
-   text += StringFormat("  News: %s | Spread: %d pts\n",
-                        g_newsStatus == "" ? "clear" : g_newsStatus,
-                        (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD));
-   text += "--------------------------------------------------\n";
-   text += StringFormat("  Last score: %.1f (%s)\n", g_lastEval.total,
-                        g_lastEval.direction == 0 ? "none" : (g_lastEval.direction > 0 ? "BUY" : "SELL"));
-   text += StringFormat("  Signals today: %d | Win rate (session): %.1f%% (W%d/L%d/C%d)\n",
-                        signalMgr.SignalsSince(dayStart), winRate, wins, losses, cancelled);
-   text += StringFormat("  LINE: %s\n", line.FailCount() == 0 ? "OK" : StringFormat("%d fails", line.FailCount()));
-   text += StringFormat("  Status: %s\n", g_status);
-   text += "==================================================\n";
+   text += "===== CAPITAL GUARD SIGNAL - multi-symbol (no auto-trade) =====\n";
+   text += StringFormat("  Session: %s | KillZone: %s | News: %s\n",
+                        CurrentSessionName() == "" ? "closed hrs" : CurrentSessionName(),
+                        InKillZone() ? "YES" : "no",
+                        g_newsStatus == "" ? "clear" : g_newsStatus);
+   text += StringFormat("  Signals today: %d | Active: %d | Win rate: %.1f%% (W%d/L%d/C%d)\n",
+                        signalMgr.SignalsSince(dayStart), signalMgr.ActiveCount(),
+                        winRate, wins, losses, cancelled);
+   text += StringFormat("  LINE: %s | Status: %s\n",
+                        line.FailCount() == 0 ? "OK" : StringFormat("%d fails", line.FailCount()),
+                        g_status);
+   text += "---------------------------------------------------------------\n";
+   for(int i = 0; i < ArraySize(g_analysts); i++)
+     {
+      CSymbolAnalyst *a = g_analysts[i];
+      text += StringFormat("  T%d %-8s %-28s %s\n",
+                           a.Tier(), a.Symbol(), a.BiasSummary(), a.Status());
+     }
+   text += "===============================================================\n";
    Comment(text);
   }
 
@@ -574,42 +519,47 @@ void WriteWebDashboard()
 
    SSignalRecord lastSig;
    bool hasSig = signalMgr.LastSignal(lastSig);
-   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    string lastSigHtml = "-";
    if(hasSig)
-      lastSigHtml = StringFormat("%s @ %s | SL %s | TP2 %s | score %.0f | %s",
-                                 lastSig.dir > 0 ? "BUY" : "SELL",
-                                 DoubleToString(lastSig.entry, digits),
-                                 DoubleToString(lastSig.sl, digits),
-                                 DoubleToString(lastSig.tp2, digits),
+     {
+      int d = (int)SymbolInfoInteger(lastSig.symbol, SYMBOL_DIGITS);
+      lastSigHtml = StringFormat("%s %s @ %s | SL %s | TP2 %s | score %.0f | %s",
+                                 lastSig.symbol, lastSig.dir > 0 ? "BUY" : "SELL",
+                                 DoubleToString(lastSig.entry, d),
+                                 DoubleToString(lastSig.sl, d),
+                                 DoubleToString(lastSig.tp2, d),
                                  lastSig.score, CSignalManager::StatusName(lastSig.status));
+     }
 
    string html;
    html  = "<meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
    html += "<meta http-equiv='refresh' content='60'>";
    html += "<title>CapitalGuard Signal</title>";
    html += "<style>body{font-family:sans-serif;background:#111;color:#eee;margin:1em}"
-           "h2{color:#ffd700}table{width:100%;border-collapse:collapse}"
-           "td{padding:6px;border-bottom:1px solid #333}td:first-child{color:#999}</style>";
-   html += "<h2>CapitalGuard Signal — " + _Symbol + "</h2><table>";
+           "h2{color:#ffd700}table{width:100%;border-collapse:collapse;margin-bottom:1em}"
+           "td,th{padding:6px;border-bottom:1px solid #333;text-align:left}"
+           "td:first-child{color:#999}th{color:#ffd700}</style>";
+   html += "<h2>CapitalGuard Signal</h2><table>";
    html += "<tr><td>อัปเดตล่าสุด</td><td>" + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES) + " (server)</td></tr>";
    html += "<tr><td>สถานะตลาด</td><td>" + (CurrentSessionName() == "" ? "นอกช่วงวิเคราะห์" : CurrentSessionName())
          + (InKillZone() ? " (Kill Zone)" : "") + "</td></tr>";
-   html += "<tr><td>Trend/Bias</td><td>W1:" + TrendLabel(g_stW1) + " D1:" + TrendLabel(g_stD1)
-         + " H4:" + TrendLabel(g_stH4) + " H1:" + TrendLabel(g_stH1) + "</td></tr>";
-   html += "<tr><td>Regime</td><td>" + CRegimeDetector::RegimeName(g_regime.regime) + " / "
-         + CRegimeDetector::VolName(g_regime.vol) + "</td></tr>";
    html += "<tr><td>ข่าว</td><td>" + (g_newsStatus == "" ? "ไม่มีข่าวแรงขณะนี้" : g_newsStatus) + "</td></tr>";
-   html += "<tr><td>ความเสี่ยง (Spread)</td><td>" + IntegerToString(SymbolInfoInteger(_Symbol, SYMBOL_SPREAD)) + " points</td></tr>";
-   html += StringFormat("<tr><td>Confidence Score ล่าสุด</td><td>%.1f / 100</td></tr>", g_lastEval.total);
    html += "<tr><td>สัญญาณล่าสุด</td><td>" + lastSigHtml + "</td></tr>";
-   html += StringFormat("<tr><td>สัญญาณวันนี้</td><td>%d</td></tr>", signalMgr.SignalsSince(dayStart));
+   html += StringFormat("<tr><td>สัญญาณวันนี้ / active</td><td>%d / %d</td></tr>",
+                        signalMgr.SignalsSince(dayStart), signalMgr.ActiveCount());
    html += StringFormat("<tr><td>Win Rate (session)</td><td>%.1f%% (W%d / L%d / ยกเลิก %d)</td></tr>",
                         winRate, wins, losses, cancelled);
    html += "<tr><td>สถานะระบบ</td><td>" + g_status + "</td></tr>";
+   html += "</table>";
+   html += "<table><tr><th>Tier</th><th>Symbol</th><th>Bias</th><th>สถานะ</th></tr>";
+   for(int i = 0; i < ArraySize(g_analysts); i++)
+     {
+      CSymbolAnalyst *a = g_analysts[i];
+      html += StringFormat("<tr><td>T%d</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+                           a.Tier(), a.Symbol(), a.BiasSummary(), a.Status());
+     }
    html += "</table><p style='color:#666'>รีเฟรชอัตโนมัติทุก 60 วินาที · CapitalGuard</p>";
 
-   //--- UTF-8 so Thai text renders correctly in the browser
    int fh = FileOpen("CapitalGuard\\dashboard.html", FILE_WRITE|FILE_TXT|FILE_ANSI, ';', CP_UTF8);
    if(fh != INVALID_HANDLE)
      {

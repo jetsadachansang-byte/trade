@@ -11,6 +11,7 @@
 | | `CapitalGuardEA` | `CapitalGuardSignalEA` |
 |---|---|---|
 | หน้าที่ | เทรดอัตโนมัติเต็มรูปแบบ | วิเคราะห์อย่างเดียว **ไม่เปิดออเดอร์เอง** |
+| สินทรัพย์ | symbol ของกราฟที่ลาก | **14 สินทรัพย์พร้อมกัน** จัดลำดับ Tier 1/2/3 |
 | ผลลัพธ์ | เปิด/จัดการออเดอร์ + log | ส่งสัญญาณเข้า **LINE OA** ให้เทรดเองด้วยมือ |
 | การแจ้งเตือน | — | 📈สัญญาณ (Entry/SL/TP1-3/RR/Score/เหตุผล), ✅TP Hit, 🛑SL Hit, ❌Cancelled |
 | ICT เพิ่มเติม | — | Weekly Bias, Kill Zones, OTE, PO3 (sweep→BOS), SMT (DXY proxy) |
@@ -39,6 +40,7 @@ MQL5/
     ├── TradeManager.mqh          ← BE / Partial / ATR Trailing / Time Exit / Emergency Exit
     ├── Logger.mqh                ← บันทึกทุกออเดอร์ (CSV + JSONL)
     ├── LineNotify.mqh            ← ส่งข้อความเข้า LINE OA (Messaging API)
+    ├── SymbolAnalyst.mqh         ← นักวิเคราะห์ 1 ตัวต่อ 1 สินทรัพย์ (multi-symbol)
     ├── SignalManager.mqh         ← วงจรชีวิตสัญญาณ: TP1/2/3, SL, ยกเลิก
     └── Dashboard.mqh             ← แดชบอร์ดบนกราฟ
 python/
