@@ -6,6 +6,18 @@
 
 **กฎเหล็ก:** ไม่มี Martingale / ไม่มี Grid / ไม่เฉลี่ยขาดทุน / ไม่ย้าย SL ออกห่าง / ทุกออเดอร์ต้องมี SL และ TP / ถึง Daily Loss หยุดเทรดทันที
 
+## สองโหมดการใช้งาน
+
+| | `CapitalGuardEA` | `CapitalGuardSignalEA` |
+|---|---|---|
+| หน้าที่ | เทรดอัตโนมัติเต็มรูปแบบ | วิเคราะห์อย่างเดียว **ไม่เปิดออเดอร์เอง** |
+| ผลลัพธ์ | เปิด/จัดการออเดอร์ + log | ส่งสัญญาณเข้า **LINE OA** ให้เทรดเองด้วยมือ |
+| การแจ้งเตือน | — | 📈สัญญาณ (Entry/SL/TP1-3/RR/Score/เหตุผล), ✅TP Hit, 🛑SL Hit, ❌Cancelled |
+| ICT เพิ่มเติม | — | Weekly Bias, Kill Zones, OTE, PO3 (sweep→BOS), SMT (DXY proxy) |
+| Dashboard | บนกราฟ | บนกราฟ + `dashboard.html` เปิดจากมือถือได้ |
+
+ทั้งสองใช้แกนวิเคราะห์ SMC เดียวกัน (โมดูลชุดเดียว) — สัญญาณออกเฉพาะคะแนน ≥ 90 และผ่าน pipeline ครบทุกขั้น
+
 📖 **คู่มือติดตั้ง-ใช้งานฉบับละเอียด (XM + Backtest + Optimization): [docs/MANUAL_TH.md](docs/MANUAL_TH.md)**
 
 ## โครงสร้างโปรเจกต์ (Modular OOP)
@@ -13,7 +25,8 @@
 ```
 MQL5/
 ├── Experts/
-│   ├── CapitalGuardEA.mq5        ← EA หลัก v2 (ระบบเต็ม)
+│   ├── CapitalGuardEA.mq5        ← EA เทรดอัตโนมัติ (SMC-first v3)
+│   ├── CapitalGuardSignalEA.mq5  ← EA วิเคราะห์+ส่งสัญญาณ LINE OA (ไม่เทรดเอง)
 │   └── TradeTemplate_TP_SL.mq5   ← template อย่างง่าย (เวอร์ชันแรก)
 └── Include/CapitalGuard/
     ├── RiskManager.mqh           ← บริหารความเสี่ยง + position sizing
@@ -25,12 +38,15 @@ MQL5/
     ├── ScoringEngine.mqh         ← คะแนน 10 หมวดถ่วงน้ำหนัก 0-100
     ├── TradeManager.mqh          ← BE / Partial / ATR Trailing / Time Exit / Emergency Exit
     ├── Logger.mqh                ← บันทึกทุกออเดอร์ (CSV + JSONL)
+    ├── LineNotify.mqh            ← ส่งข้อความเข้า LINE OA (Messaging API)
+    ├── SignalManager.mqh         ← วงจรชีวิตสัญญาณ: TP1/2/3, SL, ยกเลิก
     └── Dashboard.mqh             ← แดชบอร์ดบนกราฟ
 python/
 ├── feature_engineering.py        ← แปลง log → feature matrix
 ├── train_model.py                ← เทรนโมเดล ML (veto filter)
 ├── walk_forward.py               ← Walk-Forward Analysis
 ├── monte_carlo.py                ← Monte Carlo simulation (risk of ruin)
+├── signal_stats.py               ← สถิติสัญญาณ รายวัน/สัปดาห์/เดือน
 └── requirements.txt
 docs/
 └── MANUAL_TH.md                  ← คู่มือฉบับละเอียด

@@ -128,7 +128,52 @@ python monte_carlo.py --features features.csv --balance 30 --sims 5000
 
 ไฟล์ log อยู่ที่ `MT5 Data Folder/MQL5/Files/CapitalGuard/` (backtest จะอยู่ใต้ `Tester/<agent>/MQL5/Files/`)
 
-## 8. FAQ / ปัญหาที่พบบ่อย
+## 8. ระบบส่งสัญญาณผ่าน LINE OA (CapitalGuardSignalEA)
+
+EA ตัวที่สอง `CapitalGuardSignalEA.mq5` **ไม่เปิดออเดอร์เอง** — วิเคราะห์ด้วย SMC/ICT ชุดเดียวกันแล้วส่งสัญญาณเข้า LINE OA ให้คุณเปิดออเดอร์เอง
+
+### 8.1 เตรียม LINE Official Account
+1. สมัคร LINE OA ที่ https://manager.line.biz (ฟรี)
+2. เข้า https://developers.line.biz → สร้าง **Messaging API channel** ผูกกับ OA
+3. ในแท็บ Messaging API → กด **Issue** สร้าง **Channel access token (long-lived)** → คัดลอกเก็บไว้
+4. เพิ่ม OA ของตัวเองเป็นเพื่อน (สแกน QR ในหน้า Messaging API)
+5. หา userId ของตัวเอง (ถ้าจะส่งแบบ push เจาะจงคน): ดูจาก webhook event หรือใช้ Broadcast แทนก็ได้ (ส่งหาผู้ติดตามทุกคน — ง่ายสุด ปล่อย `InpLineUserId` ว่าง)
+
+> LINE Notify เดิมปิดบริการแล้ว (มี.ค. 2025) — ระบบนี้ใช้ Messaging API ของ LINE OA ซึ่งเป็นทางการ โควตาฟรี 500 ข้อความ/เดือน (แผน Communication) — พอสำหรับสัญญาณคุณภาพสูงที่ออกไม่กี่ครั้ง/วัน
+
+### 8.2 ตั้งค่า MT5
+1. **Tools → Options → Expert Advisors** → ติ๊ก **Allow WebRequest for listed URL** → เพิ่ม `https://api.line.me`
+2. Compile `CapitalGuardSignalEA.mq5` แล้วลากลงกราฟทอง M5
+3. Input สำคัญ: `InpLineToken` = channel access token, `InpLineUserId` = เว้นว่าง (broadcast) หรือใส่ userId
+4. ทดสอบ: ตอน EA เริ่มจะส่งข้อความ "🤖 CapitalGuard Signal เริ่มทำงาน" เข้า LINE ทันที — ถ้าไม่มา ดูแท็บ Journal/Experts
+
+### 8.3 สิ่งที่ระบบส่ง
+- 📈/📉 **สัญญาณใหม่** — คู่เงิน, ราคาเข้า, SL, TP1/TP2/TP3, RR, Timeframe, Confidence Score, เหตุผล (BOS / Sweep / OB / FVG / Trend), เวลาวิเคราะห์
+- ✅ **TP1/TP2/TP3 Hit** — พร้อมคำแนะนำเลื่อน SL เป็น Break Even หลัง TP1
+- 🛑 **Stop Loss Hit**
+- ❌ **Signal Cancelled** — เมื่อโครงสร้างเปลี่ยนทิศ (CHoCH สวน) ก่อนถึง TP1 หรือเกินเวลา `InpSignalExpiryHrs` (12 ชม.)
+
+### 8.4 ICT Layer ที่เพิ่มใน Signal EA
+- **Weekly/Daily Bias** — โครงสร้าง W1 ห้ามสวนทิศ (`InpReqWeeklyBias`)
+- **Kill Zones** — ส่งสัญญาณเฉพาะช่วง London KZ (09–12 server) และ NY KZ (15–18 server) (`InpUseKillZones`)
+- **OTE** — โซน pullback 62–79% ของ swing leg (`InpReqOTE` ค่าเริ่มต้นปิด — เปิดเมื่ออยากเข้มสุด)
+- **Power of Three** — สะท้อนใน pipeline อยู่แล้ว: Accumulation (range) → Manipulation (sweep) → Distribution (BOS)
+- **SMT Divergence** — ใช้ DXY filter เป็นตัวแทน (`InpUseDxyFilter` + `InpDxySymbol`)
+
+### 8.5 Dashboard มือถือ
+EA เขียนไฟล์ `MQL5/Files/CapitalGuard/dashboard.html` (รีเฟรชตัวเองทุก 60 วิ) แสดง: สถานะตลาด, Trend/Bias ทุก TF, ข่าว, spread, score ล่าสุด, สัญญาณล่าสุด, win rate, จำนวนสัญญาณวันนี้
+
+วิธีเปิดจากมือถือ (เลือกอย่างใดอย่างหนึ่ง):
+- ติดตั้ง MT5 บน VPS แล้วรัน web server เล็ก ๆ ชี้ไปที่โฟลเดอร์ Files: `python -m http.server 8080` → เปิด `http://<ip-vps>:8080/CapitalGuard/dashboard.html` จากมือถือ
+- หรือ sync โฟลเดอร์ `MQL5/Files/CapitalGuard/` ขึ้น cloud drive (Dropbox/Google Drive) แล้วเปิดไฟล์จากแอปมือถือ
+
+### 8.6 สถิติสัญญาณ
+```bash
+python python/signal_stats.py --log signals_20260804.jsonl
+```
+สรุป win rate, net R, จำนวนสัญญาณ แยก **รายวัน / รายสัปดาห์ / รายเดือน** จาก log จริง
+
+## 9. FAQ / ปัญหาที่พบบ่อย
 
 **EA ไม่เปิดออเดอร์เลยหลายวัน** — ปกติ ตามดีไซน์ ดูบรรทัด `Status:` บน dashboard จะบอกเหตุผลปัจจุบัน (คะแนนไม่ถึง / checklist ข้อไหนไม่ผ่าน / นอก session / ติดข่าว)
 
@@ -142,7 +187,7 @@ python monte_carlo.py --features features.csv --balance 30 --sims 5000
 
 **Global Variables ค้าง** — ระบบเก็บ peak equity / R ของ position ใน terminal global variables (F3 ใน MT5 ดูได้ ชื่อขึ้นต้น `CG_`) ลบได้ถ้าต้องการ reset drawdown tracking (ระวัง: จะ reset circuit breaker ด้วย)
 
-## 9. สิ่งที่ระบบนี้ไม่ทำ (โดยตั้งใจ)
+## 10. สิ่งที่ระบบนี้ไม่ทำ (โดยตั้งใจ)
 
 - ไม่ Martingale, ไม่ Grid, ไม่เฉลี่ยขาดทุน, ไม่ย้าย SL ออกห่าง (โค้ดอนุญาตให้ SL ขยับเข้าหากำไรเท่านั้น)
 - ไม่เปิดออเดอร์ไม่มี SL/TP — ไม่มีเส้นทางในโค้ดที่ทำได้
