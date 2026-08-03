@@ -1,176 +1,149 @@
-# คู่มือการติดตั้งและใช้งาน CapitalGuard EA v3 — SMC-First (ฉบับละเอียด)
+# คู่มือติดตั้งและใช้งาน CapitalGuard Signal (ฉบับละเอียด)
 
-สำหรับโบรกเกอร์ XM / MetaTrader 5 / XAUUSD — ทุนเริ่มต้น $30
+ระบบวิเคราะห์ตลาดด้วย SMC/ICT บน MetaTrader 5 → ส่งสัญญาณเข้า LINE Official Account
+
+> **ระบบนี้ไม่เปิดออเดอร์ให้** วิเคราะห์และแจ้งเตือนเท่านั้น การเปิดออเดอร์และบริหารความเสี่ยงเป็นของคุณทั้งหมด
 
 ---
 
-## 1. เตรียมบัญชี XM
+## สารบัญ
 
-1. เปิดบัญชี XM แนะนำประเภท **Micro Account** สำหรับทุน $30
-   - บัญชี Micro: 1 lot = 1 oz ของทอง → ความเสี่ยงต่อจุดต่ำกว่าบัญชี Standard 100 เท่า ทำให้ risk 0.5–1% ต่อไม้ **ทำได้จริง**
-   - บัญชี Standard: 0.01 lot ขั้นต่ำก็ยังเสี่ยง ~10% ต่อไม้ที่ทุน $30 — ไม่แนะนำ
-2. Leverage: ตั้งได้ตามต้องการ (เช่น 1:500) — **leverage สูงไม่ได้เพิ่มความเสี่ยงของ EA นี้** เพราะขนาด lot ถูกคุมด้วย risk % เสมอ leverage มีผลแค่ margin ที่ถูกใช้
-3. ดาวน์โหลด MT5 จาก XM แล้วล็อกอินบัญชี
-4. ตรวจสอบชื่อ symbol ทองของ XM: โดยทั่วไปคือ `GOLD` หรือ `GOLD#` หรือ `XAUUSD` (แล้วแต่ประเภทบัญชี) — เปิดกราฟ symbol นั้น
+1. [เตรียม LINE Official Account](#1-เตรียม-line-official-account)
+2. [ตั้งค่า MetaTrader 5](#2-ตั้งค่า-metatrader-5)
+3. [ติดตั้งไฟล์และ Compile](#3-ติดตั้งไฟล์และ-compile)
+4. [ตรวจชื่อ Symbol ของโบรกเกอร์](#4-ตรวจชื่อ-symbol-ของโบรกเกอร์)
+5. [ลาก EA ลงกราฟและตั้งค่า](#5-ลาก-ea-ลงกราฟและตั้งค่า)
+6. [ทดสอบว่าเชื่อมต่อสำเร็จ](#6-ทดสอบว่าเชื่อมต่อสำเร็จ)
+7. [ข้อความที่ระบบส่ง](#7-ข้อความที่ระบบส่ง)
+8. [พารามิเตอร์ทั้งหมด](#8-พารามิเตอร์ทั้งหมด)
+9. [Dashboard บนมือถือ](#9-dashboard-บนมือถือ)
+10. [สถิติสัญญาณ](#10-สถิติสัญญาณ)
+11. [รัน 24 ชม. ด้วย VPS](#11-รัน-24-ชม-ด้วย-vps)
+12. [แก้ปัญหา](#12-แก้ปัญหา)
 
-## 2. ติดตั้ง EA
+---
 
-1. MT5 → เมนู **File → Open Data Folder**
-2. คัดลอกไฟล์จาก repo นี้:
-   - `MQL5/Experts/CapitalGuardEA.mq5` → ไปที่ `MQL5/Experts/`
-   - โฟลเดอร์ `MQL5/Include/CapitalGuard/` ทั้งโฟลเดอร์ → ไปที่ `MQL5/Include/CapitalGuard/`
-3. เปิด MetaEditor (กด F4 ใน MT5) → เปิด `CapitalGuardEA.mq5` → กด **Compile (F7)** — ต้องขึ้น `0 errors, 0 warnings`
-4. กลับมา MT5 → เปิดกราฟทอง **M5** → ลาก `CapitalGuardEA` จาก Navigator ลงกราฟ
-5. แท็บ Common: ติ๊ก **Allow Algo Trading** → OK
-6. เปิดปุ่ม **Algo Trading** บนแถบเครื่องมือ (ต้องเป็นสีเขียว)
-7. เปิดสิทธิ์ปฏิทินข่าว: **Tools → Options → Server → ติ๊ก Enable news**
+## 1. เตรียม LINE Official Account
 
-Dashboard จะปรากฏมุมซ้ายบนของกราฟทันทีที่ EA ทำงาน
+### 1.1 เปิดใช้ Messaging API
+1. เข้า [manager.line.biz](https://manager.line.biz) → เลือก OA ของคุณ
+2. **Settings (ตั้งค่า) → Messaging API** → กด **Enable Messaging API**
+3. เลือกหรือสร้าง **Provider** (ตั้งชื่ออะไรก็ได้ เช่น "CapitalGuard") → ยืนยัน
 
-## 3. การตั้งค่าที่สำคัญ (Input Parameters)
+### 1.2 เอา Channel Access Token
+1. เข้า [developers.line.biz/console](https://developers.line.biz/console) → login ด้วยบัญชี LINE เดียวกัน
+2. เลือก Provider → เลือก channel ของ OA
+3. แท็บ **Messaging API** → เลื่อนล่างสุด **Channel access token (long-lived)** → กด **Issue**
+4. คัดลอก token เก็บไว้ (ยาว ~170 ตัวอักษร)
 
-### ความเสี่ยง (อย่าแก้ถ้าไม่จำเป็น)
-| Input | ค่าเริ่มต้น | คำอธิบาย |
-|---|---|---|
-| `InpRiskPerTrade` | 0.75 | % ความเสี่ยงต่อไม้ (0.5–1 ตามสเปค) |
-| `InpMaxDailyLoss` | 3.0 | ขาดทุนถึง 3% ของวัน → หยุดทั้งวัน |
-| `InpMaxWeeklyLoss` | 8.0 | ขาดทุนถึง 8% ของสัปดาห์ → หยุดทั้งสัปดาห์ |
-| `InpMaxDrawdown` | 15.0 | DD จากจุดสูงสุด → หยุดทุกอย่าง (circuit breaker) |
-| `InpMaxTradesPerDay` | 2 | จำกัดจำนวนไม้ต่อวัน |
-| `InpHardRiskCap` | 3.0 | เพดานความเสี่ยงจริงเมื่อจำเป็นต้องใช้ lot ขั้นต่ำ |
+> 🔒 **ห้ามแชร์ token ให้ใคร** ใครมี token นี้สามารถส่งข้อความในนาม OA ของคุณได้ และห้าม commit ขึ้น GitHub
 
-### เกณฑ์การเข้า (SMC Pipeline)
-| Input | ค่าเริ่มต้น | คำอธิบาย |
-|---|---|---|
-| `InpScoreThreshold` | 90 | คะแนนขั้นต่ำ — ต่ำกว่านี้ไม่เข้าเด็ดขาด |
-| `InpReqBosChoch` | true | ต้องมี BOS/CHoCH ในทิศทางเทรด |
-| `InpReqOrderBlock` / `InpMinOBQuality` | true / 60 | ต้องมี OB คุณภาพ ≥ 60 |
-| `InpReqFVG` | true | ต้องมี Fair Value Gap |
-| `InpReqSweep` | true | ต้องเกิด Liquidity Sweep ก่อน |
-| `InpReqPremiumDiscount` / `InpDiscountMax` | true / 0.5 | Buy เฉพาะ discount, Sell เฉพาะ premium |
-| `InpReqMitigation` | true | ราคาต้องกลับมา mitigate OB/FVG ก่อนเข้า |
-| `InpReqTrendConfirm` | true | M30/M15 ห้ามสวนทิศทาง |
-| `InpAllowCounterTrend` | false | อนุญาตสวนเทรนด์เมื่อมี CHoCH ชัดเจนบน H1 |
-| `InpReqLiquidityTarget` | false | บังคับให้มี BSL/SSL pool ในทิศกำไร (เข้มพิเศษ) |
-| `InpMinRR` | 2.0 | Risk:Reward ขั้นต่ำ 1:2 |
+### 1.3 เพิ่ม OA เป็นเพื่อน
+สแกน **QR code** ในหน้า Messaging API ด้วยมือถือ — ถ้าไม่ทำข้อนี้จะไม่ได้รับข้อความ แม้ระบบส่งสำเร็จ
 
-> ⚠️ **ค่าเริ่มต้นเข้มงวดมากตามสเปค** — pipeline 11 ขั้นต้องผ่านครบ (Sweep+BOS/CHoCH+OB+FVG+Mitigation พร้อมกัน) บางสัปดาห์อาจไม่มีออเดอร์เลย ซึ่ง**ถือว่าปกติและถูกต้อง** — dashboard บรรทัด `Status:` จะบอกว่ารออยู่ที่ step ไหน หาก backtest แล้วจำนวนเทรดน้อยจนวัดสถิติไม่ได้ ให้ผ่อนทีละข้อ (แนะนำเริ่มจาก `InpReqMitigation=false` → `InpReqFVG=false`) แล้ว backtest เทียบกันทุกครั้ง **อย่าลดหลายข้อพร้อมกัน**
+### 1.4 ปิดข้อความอัตโนมัติ (แนะนำ)
+LINE OA Manager → **Settings → Response settings** → ปิด **Auto-reply messages** และ **Greeting message**
+เพื่อไม่ให้ข้อความอัตโนมัติมาปนกับสัญญาณ
 
-### เวลาเทรด (สำคัญ — ต้องปรับตามโบรกเกอร์)
-เวลาใน EA เป็น**เวลา server ของ XM** (GMT+2 หรือ GMT+3 ช่วง DST):
-- London session ≈ 10:00–18:00 server time (ค่าเริ่มต้นตั้งไว้แล้ว)
-- New York ≈ 15:00–23:00 server time
-- ช่วง Overlap (15:00–18:00) ได้คะแนน session สูงสุด
+> ℹ️ LINE Notify เดิมปิดบริการไปแล้ว (มี.ค. 2025) ระบบนี้ใช้ **Messaging API** ซึ่งเป็นช่องทางการปัจจุบัน
 
-ตรวจสอบ: ดูเวลาที่มุม Market Watch เทียบกับเวลาไทย (ไทย = GMT+7; ถ้า server GMT+3 → เวลาไทยเร็วกว่า server 4 ชม.)
+---
 
-### News Filter
-- `InpNewsPreMin/PostMin` = 45 นาที ก่อน/หลังข่าว impact สูง (ปรับได้ 30–60)
-- ข่าวที่ไม่อยู่ในปฏิทิน (สงคราม, เหตุการณ์ภูมิรัฐศาสตร์, สุนทรพจน์กะทันหัน) → ใส่เวลาที่ `InpNewsManualTimes` รูปแบบ `2026.08.05 21:00;2026.08.07 19:30` (เวลา server)
-- DXY filter (`InpUseDxyFilter`): XM ไม่มี DXY โดยตรงในบางประเภทบัญชี — ถ้ามี symbol ดัชนีดอลลาร์ (เช่น `USDX`) ใส่ชื่อที่ `InpDxySymbol` แล้วเปิดใช้ ระบบจะไม่เข้าไม้ทองที่วิ่งทิศเดียวกับแนวโน้ม DXY
+## 2. ตั้งค่า MetaTrader 5
 
-## 4. Backtest (บังคับก่อนใช้เงินจริง)
+**Tools → Options → Expert Advisors** → ติ๊ก ✅ **Allow WebRequest for listed URL** → กดเพิ่ม:
 
-1. MT5 → View → **Strategy Tester** (Ctrl+R)
-2. ตั้งค่า:
-   - Expert: `CapitalGuardEA`
-   - Symbol: ทองของ XM / Timeframe: **M5**
-   - Modelling: **Every tick based on real ticks** (แม่นสุด) หรือ 1 minute OHLC (เร็วกว่า ใช้คัดกรองรอบแรก)
-   - ช่วงเวลา: **อย่างน้อย 5 ปี** (2021–2026 ครอบคลุม bull/bear/sideway/สงคราม/เงินเฟ้อ)
-   - Deposit: 30 USD, Leverage ตามบัญชีจริง
-3. ⚠️ Strategy Tester **ไม่มีปฏิทินข่าว** — ผล backtest จะไม่รวม news filter (ยกเว้น manual list) ผลจริงควรดีกว่า backtest เล็กน้อยเพราะ live มีตัวกรองข่าวเพิ่ม
-4. เกณฑ์ผ่านขั้นต่ำ:
-
-| Metric | เกณฑ์ |
-|---|---|
-| Profit Factor | > 1.3 |
-| Max Drawdown | < 15% |
-| Sharpe Ratio | > 0.8 |
-| Recovery Factor | > 2 |
-| Expectancy | > 0 หลังหัก spread/commission |
-| จำนวนเทรด | > 100 ไม้ (น้อยกว่านี้สถิติไม่มีนัย) |
-
-## 5. Optimization อย่างปลอดภัย (กัน Overfitting)
-
-1. Strategy Tester → Settings → **Optimization: Genetic** → **Forward: 1/3**
-2. พารามิเตอร์ที่ควร optimize (ทีละกลุ่ม อย่าทำพร้อมกันทั้งหมด):
-   - กลุ่ม SMC: `InpSwingBars` (2–5), `InpSmcWindow` (20–50), `InpMinOBQuality` (50–80), `InpDiscountMax` (0.4–0.6)
-   - กลุ่ม SL/TP: `InpAtrMultSL` (1.0–2.5), `InpBaseRR` (1.5–3.0), `InpAtrTrailMult` (0.8–2.0)
-   - กลุ่มเกณฑ์เข้า: `InpScoreThreshold` (80–95)
-   - กลุ่มเวลา: ช่วง session
-3. **กติกาเลือกผล:** เลือกชุดที่กำไร/DD ในช่วง **Forward ใกล้เคียงช่วง Back** — ไม่ใช่ชุดที่ back สูงสุด ชุดที่ดีเฉพาะ back คือ overfit ให้ทิ้ง
-4. รัน Monte Carlo ซ้ำด้วย Python (ข้อ 7) เพื่อดูความเสี่ยงลำดับเทรดสลับกัน
-
-## 6. Forward Test
-
-1. รัน EA บน **บัญชีเดโม่ XM** (สเปรดใกล้จริง) อย่างน้อย **1–3 เดือน**
-2. ทุกสัปดาห์เทียบสถิติจริงกับ backtest: win rate, avg RR, DD — ถ้าเบี่ยงมาก (เช่น winrate ต่ำกว่า backtest เกิน 15 จุด) ให้หยุดและหาสาเหตุ
-3. ตรวจไฟล์ log `MQL5/Files/CapitalGuard/trades_<magic>.csv` — ทุกไม้ต้องมีเหตุผล และไม้ที่ถูก skip ต้องมีเหตุผลถูกต้อง
-4. ผ่านแล้วจึงลงเงินจริง โดย**เริ่มที่ risk ต่ำสุด 0.5%** ก่อนเสมอ
-
-## 7. Python Pipeline (ML / Monte Carlo)
-
-```bash
-cd python && pip install -r requirements.txt
-
-# แปลง log เป็น feature matrix
-python feature_engineering.py --log trades_20260803.jsonl --out features.csv
-
-# เทรนโมเดล veto (ต้องมี 100+ เทรดขึ้นไป)
-python train_model.py --features features.csv --model model.pkl
-
-# Walk-forward ของโมเดล
-python walk_forward.py --features features.csv --train-window 200 --test-window 50
-
-# Monte Carlo: ความเสี่ยงพัง 15% DD มีโอกาสกี่ %
-python monte_carlo.py --features features.csv --balance 30 --sims 5000
+```
+https://api.line.me
 ```
 
-ไฟล์ log อยู่ที่ `MT5 Data Folder/MQL5/Files/CapitalGuard/` (backtest จะอยู่ใต้ `Tester/<agent>/MQL5/Files/`)
+→ กด OK
 
-## 8. ระบบส่งสัญญาณผ่าน LINE OA (CapitalGuardSignalEA)
+> ⚠️ **ข้อนี้ลืมบ่อยที่สุด** ถ้าไม่ทำ EA จะทำงานปกติแต่ข้อความไม่ออก และ Journal จะขึ้น `WebRequest blocked`
 
-EA ตัวที่สอง `CapitalGuardSignalEA.mq5` **ไม่เปิดออเดอร์เอง** — วิเคราะห์หลายสินทรัพย์พร้อมกันด้วย SMC/ICT ชุดเดียวกัน แล้วส่งสัญญาณเข้า LINE OA ให้คุณเปิดออเดอร์เอง
+เปิดสิทธิ์ปฏิทินข่าวด้วย: **Tools → Options → Server** → ติ๊ก **Enable news**
 
-### 8.0 ขอบเขตสินทรัพย์ที่วิเคราะห์ (จัดลำดับความสำคัญ)
+---
 
-| Tier | สินทรัพย์ | ความถี่การวิเคราะห์ |
-|---|---|---|
-| **1** ⭐ | XAUUSD | **ทุกรอบสแกน (15 วิ)** ประเมินใหม่ทันทีที่โครงสร้าง/ราคาเปลี่ยน |
-| **2** | EURUSD, GBPUSD, USDJPY, USDCHF, AUDUSD, NZDUSD, USDCAD | ทุกแท่งเทียน M5 ที่ปิด |
-| **3** | EURJPY, GBPJPY, EURGBP, AUDJPY, CADJPY, CHFJPY | ทุกแท่งปิด + **เกณฑ์คะแนนสูงกว่า** (+2 คะแนน) |
+## 3. ติดตั้งไฟล์และ Compile
 
-**ลำดับการส่ง** เมื่อมีหลาย setup พร้อมกันในรอบเดียว ระบบส่งตัวที่ priority สูงสุดก่อน: XAUUSD → EURUSD → GBPUSD → USDJPY → major อื่น → cross
-(ลำดับมาจากลำดับชื่อใน `InpTier1Symbols` / `InpTier2Symbols` / `InpTier3Symbols` — แก้ลำดับได้ตามต้องการ)
+1. MT5 → **File → Open Data Folder**
+2. คัดลอกไฟล์จาก repo:
+   - `MQL5/Experts/CapitalGuardSignalEA.mq5` → ไปที่ `MQL5/Experts/`
+   - โฟลเดอร์ `MQL5/Include/CapitalGuard/` **ทั้งโฟลเดอร์** → ไปที่ `MQL5/Include/`
+3. เปิด MetaEditor (กด **F4** ใน MT5) → เปิด `CapitalGuardSignalEA.mq5`
+4. กด **Compile (F7)** → ต้องขึ้น `0 errors`
 
-> ⚠️ **ชื่อ symbol ต้องตรงกับโบรกเกอร์** — XM ใช้ `GOLD` แทน `XAUUSD` ในบางประเภทบัญชี และบางโบรกเกอร์เติมท้ายเช่น `EURUSDm`, `EURUSD.raw`
-> วิธีตรวจ: เปิด Market Watch (Ctrl+M) → คลิกขวา → Show All → ดูชื่อจริง แล้วแก้ใน input ทั้ง 3 ช่อง
-> symbol ไหนไม่มีในโบรกเกอร์ ระบบจะข้ามและเขียนเตือนใน Journal (ไม่ crash)
+> โฟลเดอร์ `archive/` ในโปรเจกต์คือเวอร์ชันบอทเทรดอัตโนมัติเดิม **ไม่ต้องคัดลอก** เก็บไว้อ้างอิงเท่านั้น
 
-### 8.1 เตรียม LINE Official Account
-1. สมัคร LINE OA ที่ https://manager.line.biz (ฟรี)
-2. ใน LINE OA Manager → **Settings → Messaging API** → กด **Enable Messaging API** → เลือก/สร้าง Provider
-3. เข้า https://developers.line.biz/console → เลือก channel ของ OA → แท็บ **Messaging API**
-4. เลื่อนล่างสุด **Channel access token (long-lived)** → กด **Issue** → คัดลอกเก็บไว้ (ห้ามแชร์)
-5. สแกน QR ในหน้าเดียวกันเพื่อ **เพิ่ม OA ตัวเองเป็นเพื่อน**
-6. แนะนำปิด **Auto-reply** และ **Greeting message** ใน LINE OA Manager → Settings → Response settings (กันข้อความอัตโนมัติมากวน)
+---
 
-> LINE Notify เดิมปิดบริการแล้ว (มี.ค. 2025) — ระบบนี้ใช้ Messaging API ของ LINE OA ซึ่งเป็นช่องทางการ โควตาฟรี 500 ข้อความ/เดือน
+## 4. ตรวจชื่อ Symbol ของโบรกเกอร์
 
-### 8.2 ตั้งค่า MT5
-1. **Tools → Options → Expert Advisors** → ติ๊ก ✅ **Allow WebRequest for listed URL** → เพิ่ม `https://api.line.me` → OK
-   ⚠️ ลืมข้อนี้ = ข้อความไม่ออก และ Journal จะขึ้น `WebRequest blocked`
-2. Compile `CapitalGuardSignalEA.mq5` (F7) → ต้องได้ `0 errors`
-3. ลากลงกราฟ **เดียว** เท่านั้น (แนะนำ XAUUSD M5) — EA จัดการทุก symbol เองผ่าน timer ไม่ต้องลากหลายกราฟ
-4. ตั้ง input กลุ่ม `=== LINE OA ===`:
-   - `InpLineEnabled` = **true**
-   - `InpLineToken` = วาง token จากข้อ 8.1
-   - `InpLineUserId` = **เว้นว่าง** (broadcast ถึงผู้ติดตามทุกคน) หรือใส่ userId ถ้าจะส่งเฉพาะตัวเอง
-5. ตั้ง input กลุ่ม `=== Symbols ===` ให้ตรงชื่อ symbol ของโบรกเกอร์
-6. กด OK → ต้องได้ข้อความ **"🤖 CapitalGuard Signal เริ่มทำงาน"** เข้า LINE ทันที
+ชื่อ symbol ต่างกันในแต่ละโบรกเกอร์ ต้องตรวจก่อนตั้งค่า:
 
-### 8.3 สิ่งที่ระบบส่ง
-**สัญญาณใหม่** (รูปแบบเต็ม):
+1. เปิด **Market Watch** (Ctrl+M) → คลิกขวา → **Show All**
+2. ดูชื่อจริงของแต่ละคู่
+
+| ชื่อมาตรฐาน | อาจเป็น |
+|---|---|
+| XAUUSD | `GOLD`, `XAUUSD.raw`, `XAUUSDm`, `GOLD#` |
+| EURUSD | `EURUSDm`, `EURUSD.a`, `EURUSD_i` |
+
+จดชื่อจริงไว้ใช้ในขั้นถัดไป — **symbol ที่พิมพ์ผิดระบบจะข้ามและเขียนเตือนใน Journal ไม่ทำให้ EA พัง**
+
+---
+
+## 5. ลาก EA ลงกราฟและตั้งค่า
+
+ลาก `CapitalGuardSignalEA` ลง **กราฟเดียวเท่านั้น** (แนะนำกราฟทอง M5)
+
+> EA จัดการทุก symbol เองผ่าน timer — **ไม่ต้องลากหลายกราฟ** ลากซ้ำจะทำให้ได้ข้อความซ้ำ
+
+### ค่าที่ต้องแก้
+
+**กลุ่ม `=== LINE OA ===`**
+
+| Input | ใส่อะไร |
+|---|---|
+| `InpLineEnabled` | `true` |
+| `InpLineToken` | วาง token จากข้อ 1.2 |
+| `InpLineUserId` | **เว้นว่าง** = broadcast ถึงผู้ติดตามทุกคน (ง่ายสุด) |
+
+**กลุ่ม `=== Symbols (priority order) ===`**
+
+| Input | ค่าเริ่มต้น |
+|---|---|
+| `InpTier1Symbols` | `XAUUSD` (เปลี่ยนเป็น `GOLD` ถ้าโบรกเกอร์ใช้ชื่อนี้) |
+| `InpTier2Symbols` | `EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD` |
+| `InpTier3Symbols` | `EURJPY,GBPJPY,EURGBP,AUDJPY,CADJPY,CHFJPY` |
+
+ลำดับชื่อในรายการ = ลำดับความสำคัญในการส่งสัญญาณ
+
+**กลุ่ม `=== Sessions ===`** — เวลาเป็น **เวลา server ของโบรกเกอร์** (มักเป็น GMT+2/+3)
+ตรวจโดยดูเวลาที่มุมบน Market Watch เทียบกับเวลาไทย (ไทย GMT+7)
+
+---
+
+## 6. ทดสอบว่าเชื่อมต่อสำเร็จ
+
+กด **OK** → ภายในไม่กี่วินาทีต้องได้ข้อความเข้า LINE:
+
+```
+🤖 CapitalGuard Signal เริ่มทำงาน
+วิเคราะห์ 14 สินทรัพย์ (Tier1: XAUUSD)
+ส่งเฉพาะสัญญาณคะแนน >= 90
+```
+
+ได้ข้อความนี้ = เชื่อมต่อครบวงจรเรียบร้อย ระบบจะเริ่มเฝ้าตลาดทันที
+
+ถ้าไม่ได้ → ดูแท็บ **Experts** และ **Journal** ใน MT5 แล้วเทียบกับ[ตารางแก้ปัญหา](#12-แก้ปัญหา)
+
+---
+
+## 7. ข้อความที่ระบบส่ง
+
+### 7.1 สัญญาณใหม่
 ```
 📊 สินทรัพย์: XAUUSD
 📈 ประเภท: BUY
@@ -194,80 +167,168 @@ EA ตัวที่สอง `CapitalGuardSignalEA.mq5` **ไม่เปิ�
 • รอแท่งเทียน M5 ปิดยืนยันก่อนเข้า
 • ยกเลิกสัญญาณหากราคาปิดเลย SL ก่อนเข้าไม้
 • หลีกเลี่ยงการเข้าใกล้ช่วงประกาศข่าวสำคัญ
+⚠️ บริหารความเสี่ยงเอง ไม่เกิน 1% ต่อไม้ | ไม่ใช่คำแนะนำการลงทุน
 ```
-**ติดตามผลอัตโนมัติ:** ✅ TP1 Hit (+แนะนำเลื่อน SL เป็น BE) → ✅ TP2 → ✅ TP3 → 🛑 Stop Loss Hit → ❌ Signal Cancelled (โครงสร้างเปลี่ยนทิศ หรือเกิน 12 ชม.)
 
-### 8.4 ปัจจัยมหภาคสำหรับทองคำ
-ใส่ชื่อ symbol ที่โบรกเกอร์มีในกลุ่ม `=== Gold Macro Context ===`:
-- `InpDxySymbol` — ดัชนีดอลลาร์ (เช่น `USDX`)
-- `InpYieldSymbol` — พันธบัตร/yield proxy
-- `InpVixSymbol` — VIX
+**Entry Zone คืออะไร** — ช่วงราคาของ Order Block ที่ราคากำลัง mitigate อยู่ ไม่ใช่ราคาเดียว
+เข้าได้ทั้งช่วง แต่ยิ่งใกล้ขอบล่าง (สำหรับ BUY) ยิ่งได้ RR ดีกว่า
 
-กติกา: DXY หรือ Yield วิ่งทิศเดียวกับทอง = ขัดแย้ง (ปกติทองสวนทางทั้งคู่)
-- ขัดแย้ง **1 ปัจจัย** → หักคะแนน 5 (ถ้าตกต่ำกว่าเกณฑ์ = ไม่ส่ง) และเขียนเตือนในหมายเหตุ
-- ขัดแย้ง **≥2 ปัจจัย** → **ระงับสัญญาณทันที**
-- ช่องไหนเว้นว่าง = ข้ามปัจจัยนั้น (ไม่บังคับ)
+### 7.2 ติดตามผลอัตโนมัติ
 
-ส่วน FOMC/CPI/PPI/NFP/Core PCE/ดอกเบี้ย/แถลง Fed ใช้ News Filter จัดการอยู่แล้ว (เว้น ±45 นาที) และข่าวสงคราม/ภูมิรัฐศาสตร์ใส่เวลาเองได้ที่ `InpNewsManualTimes`
-
-### 8.5 ICT Layer
-- **Weekly/Daily Bias** — โครงสร้าง W1 ห้ามสวนทิศ (`InpReqWeeklyBias`)
-- **Kill Zones** — ส่งเฉพาะ London KZ (09–12 server) และ NY KZ (15–18 server) (`InpUseKillZones`)
-- **OTE** — pullback 62–79% ของ swing leg (`InpReqOTE` ปิดไว้ เปิดเมื่ออยากเข้มสุด)
-- **Power of Three** — สะท้อนใน pipeline: Accumulation (range) → Manipulation (sweep) → Distribution (BOS)
-- **SMT Divergence** — ใช้ DXY เป็น proxy
-
-### 8.6 คุมปริมาณสัญญาณ
-| Input | ค่าเริ่มต้น | ผล |
+| ข้อความ | เมื่อไหร่ | ควรทำอะไร |
 |---|---|---|
-| `InpScoreThreshold` | 90 | คะแนนขั้นต่ำทุก tier |
+| ✅ **TP1 Hit** | ราคาถึง TP1 (1R) | ปิดบางส่วน + เลื่อน SL มาจุดเข้า (BE) |
+| ✅ **TP2 Hit** | ราคาถึง TP2 (2R) | ปิดเพิ่ม หรือเลื่อน SL ตาม |
+| ✅ **TP3 Hit** | ราคาถึง TP3 (3R) | ปิดทั้งหมด สัญญาณจบสมบูรณ์ |
+| 🛑 **Stop Loss Hit** | ราคาถึง SL | ปิดตาม SL (ควรตั้ง SL ไว้ในออเดอร์ตั้งแต่แรก) |
+| ❌ **Signal Cancelled** | โครงสร้างเปลี่ยนทิศ (CHoCH สวน) ก่อนถึง TP1 หรือเกิน 12 ชม. | ถ้ายังไม่เข้า = ไม่ต้องเข้าแล้ว / ถ้าเข้าแล้ว = พิจารณาปิดก่อนถึง SL |
+
+> ⚠️ **ระบบไม่ปิดออเดอร์ให้** ข้อความ TP/SL Hit เป็นการแจ้งว่าราคาแตะระดับนั้นแล้ว คุณต้องจัดการออเดอร์เอง
+> **แนะนำให้ตั้ง SL และ TP ในออเดอร์ทันทีตอนเปิด** เพื่อไม่ต้องเฝ้าจอ
+
+---
+
+## 8. พารามิเตอร์ทั้งหมด
+
+### คุณภาพและปริมาณสัญญาณ
+| Input | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `InpScoreThreshold` | 90 | คะแนนขั้นต่ำ ต่ำกว่านี้ไม่ส่ง |
 | `InpTier3Extra` | 2.0 | cross ต้องได้ 92+ |
-| `InpMaxSignalsPerDay` | 3 | รวมทุก symbol |
+| `InpMaxSignalsPerDay` | 3 | จำกัดต่อวัน รวมทุกสินทรัพย์ |
 | `InpCooldownMinutes` | 60 | เว้นระยะระหว่างสัญญาณ |
+| `InpSignalExpiryHrs` | 12 | ยกเลิกถ้าไม่ถึง TP1 ภายในกี่ชม. |
 | `InpScanSeconds` | 15 | รอบสแกน Tier 1 |
+| `InpTP1R` / `InpTP2R` / `InpTP3R` | 1 / 2 / 3 | ระยะ TP เป็น R |
 
-ไม่ส่งสัญญาณซ้อนบน symbol เดียวกันขณะที่ยังมีสัญญาณ active อยู่
+### เงื่อนไข SMC (ทุกข้อต้องผ่าน)
+| Input | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `InpReqBosChoch` | true | ต้องมี BOS/CHoCH |
+| `InpReqOrderBlock` / `InpMinOBQuality` | true / 60 | ต้องมี OB คุณภาพ ≥ 60 |
+| `InpReqFVG` | true | ต้องมี Fair Value Gap |
+| `InpReqSweep` | true | ต้องเกิด Liquidity Sweep ก่อน |
+| `InpReqPremiumDiscount` / `InpDiscountMax` | true / 0.5 | Buy เฉพาะ discount |
+| `InpReqMitigation` | true | ราคาต้องกลับมา mitigate |
+| `InpReqTrendConfirm` | true | M30/M15 ห้ามสวน |
+| `InpAllowCounterTrend` | false | สวนเทรนด์ได้เมื่อมี CHoCH ชัด |
+| `InpReqLiquidityTarget` | false | บังคับมี pool ในทิศกำไร (เข้มพิเศษ) |
 
-### 8.7 Dashboard มือถือ
-EA เขียนไฟล์ `MQL5/Files/CapitalGuard/dashboard.html` (รีเฟรชเองทุก 60 วิ) แสดงสถานะตลาด, สัญญาณล่าสุด, win rate, จำนวนสัญญาณวันนี้ และ **ตารางทุก symbol** พร้อม bias ทุก TF และสถานะว่ารออะไรอยู่
+### ICT
+| Input | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `InpReqWeeklyBias` | true | W1 ห้ามสวนทิศ |
+| `InpUseKillZones` | true | ส่งเฉพาะช่วง Kill Zone |
+| `InpLondonKZStart/End` | 9 / 12 | London KZ (server time) |
+| `InpNYKZStart/End` | 15 / 18 | New York KZ (server time) |
+| `InpReqOTE` | false | บังคับอยู่ในโซน OTE 62–79% |
 
-วิธีเปิดจากมือถือ:
-- รัน MT5 บน VPS แล้วเปิด web server: `python -m http.server 8080` ในโฟลเดอร์ `MQL5/Files` → เข้า `http://<ip-vps>:8080/CapitalGuard/dashboard.html`
-- หรือ sync โฟลเดอร์ `MQL5/Files/CapitalGuard/` ขึ้น cloud drive แล้วเปิดจากแอปมือถือ
+### ปัจจัยมหภาคของทองคำ
+| Input | ใส่อะไร |
+|---|---|
+| `InpDxySymbol` | ชื่อ symbol ดัชนีดอลลาร์ (เช่น `USDX`) — เว้นว่างถ้าไม่มี |
+| `InpYieldSymbol` | symbol พันธบัตร/yield — เว้นว่างถ้าไม่มี |
+| `InpVixSymbol` | symbol VIX — เว้นว่างถ้าไม่มี |
+| `InpMacroPenalty` | 5.0 = หักคะแนนเมื่อขัดแย้ง 1 ปัจจัย |
 
-### 8.8 สถิติสัญญาณ
+**กติกา:** DXY หรือ Yield วิ่งทิศเดียวกับทอง = ขัดแย้ง (ปกติทองสวนทางทั้งคู่)
+ขัดแย้ง 1 ปัจจัย → หักคะแนน + เตือนในหมายเหตุ · ขัดแย้ง ≥2 ปัจจัย → **ระงับสัญญาณ**
+
+### ข่าว
+| Input | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `InpNewsPreMin` / `InpNewsPostMin` | 45 / 45 | เว้นก่อน/หลังข่าวแรง (นาที) |
+| `InpNewsCurrencies` | USD,EUR,GBP,JPY,... | สกุลที่เฝ้าข่าว |
+| `InpNewsManualTimes` | ว่าง | ข่าวที่ปฏิทินไม่มี เช่น `2026.08.05 21:00;2026.08.07 19:30` |
+
+> ข่าวสงคราม / เหตุการณ์ภูมิรัฐศาสตร์ / แถลงกะทันหัน ใส่เวลาเองที่ `InpNewsManualTimes` (เวลา server)
+
+### อยากได้สัญญาณถี่ขึ้น?
+ผ่อนเงื่อนไขทีละข้อ **อย่าลดหลายข้อพร้อมกัน** ลำดับที่แนะนำ:
+1. `InpUseKillZones` = false (วิเคราะห์ทั้ง session)
+2. `InpReqMitigation` = false
+3. `InpReqFVG` = false
+4. `InpScoreThreshold` = 85
+
+สังเกตผลอย่างน้อย 1–2 สัปดาห์ก่อนผ่อนข้อถัดไป และดูสถิติจาก `signal_stats.py` ประกอบเสมอ
+
+---
+
+## 9. Dashboard บนมือถือ
+
+EA เขียนไฟล์ `MQL5/Files/CapitalGuard/dashboard.html` (รีเฟรชตัวเองทุก 60 วินาที) แสดง:
+สถานะตลาด · Kill Zone · ข่าว · สัญญาณล่าสุด · จำนวนสัญญาณวันนี้ · Win rate · **ตารางทุก symbol** พร้อม bias ทุก TF และสถานะว่ากำลังรออะไร
+
+**วิธีเปิดจากมือถือ**
+
+*ทางเลือกที่ 1 — VPS + web server (แนะนำ)*
 ```bash
-python python/signal_stats.py --log signals_20260804.jsonl
+cd "<MT5 Data Folder>/MQL5/Files"
+python -m http.server 8080
 ```
-สรุป win rate, net R, จำนวนสัญญาณ แยก **รายวัน / รายสัปดาห์ / รายเดือน**
+เปิดจากมือถือ: `http://<ip-vps>:8080/CapitalGuard/dashboard.html`
 
-### 8.9 แก้ปัญหา
+*ทางเลือกที่ 2 — Cloud drive*
+sync โฟลเดอร์ `MQL5/Files/CapitalGuard/` ขึ้น Dropbox / Google Drive แล้วเปิดไฟล์จากแอปมือถือ
+
+---
+
+## 10. สถิติสัญญาณ
+
+ระบบบันทึกทุกเหตุการณ์ลง `MQL5/Files/CapitalGuard/signals_<magic>.csv` และ `.jsonl`
+
+```bash
+cd python
+pip install -r requirements.txt
+python signal_stats.py --log /path/to/signals_20260804.jsonl
+```
+
+ได้สรุป **รายวัน / รายสัปดาห์ / รายเดือน**: จำนวนสัญญาณ, wins, losses, ยกเลิก, win rate %, net R, คะแนนเฉลี่ย
+
+ส่งออก CSV: เพิ่ม `--export summary.csv`
+
+---
+
+## 11. รัน 24 ชม. ด้วย VPS
+
+ระบบต้องเปิด MT5 ค้างไว้ตลอดจึงจะวิเคราะห์ต่อเนื่องได้ ถ้าปิดคอมระบบจะหยุด
+
+ทางเลือก:
+- **VPS ของโบรกเกอร์** — หลายเจ้าให้ฟรีเมื่อมียอดเงินฝากขั้นต่ำ
+- **VPS ทั่วไป** (Contabo, Vultr, AWS Lightsail) เริ่มต้น ~$5–10/เดือน สเปกขั้นต่ำ 2 vCPU / 4GB RAM
+- **คอมที่บ้าน** เปิดค้าง + ตั้งไม่ให้ sleep (ประหยัดสุดแต่ต้องมีไฟ+เน็ตเสถียร)
+
+ตั้งค่าเพิ่มบน VPS: เปิด MT5 auto-start, ปิด Windows Update auto-restart, เปิด **Allow WebRequest** ให้เรียบร้อยก่อนออกจากเครื่อง
+
+---
+
+## 12. แก้ปัญหา
+
 | อาการ | สาเหตุ | วิธีแก้ |
 |---|---|---|
-| `WebRequest blocked` ใน Journal | ไม่ได้ whitelist URL | เพิ่ม `https://api.line.me` แล้วลาก EA ใหม่ |
-| `HTTP 401` | token ผิด/หมดอายุ | Issue token ใหม่ |
-| `HTTP 429` | โควตาหมด | ใช้ push แบบ userId แทน broadcast |
-| ไม่มี error แต่ไม่ได้ข้อความ | ยังไม่เป็นเพื่อนกับ OA | สแกน QR เพิ่มเพื่อน |
-| `symbol XXX not found` | ชื่อ symbol ไม่ตรงโบรกเกอร์ | แก้ input ตามชื่อจริงใน Market Watch |
-| ไม่มีสัญญาณเลยหลายวัน | **ปกติตามดีไซน์** | ดู Status บน dashboard ว่ารออะไร |
+| Journal ขึ้น `WebRequest blocked` | ไม่ได้ whitelist URL | เพิ่ม `https://api.line.me` ในข้อ 2 แล้ว**ลาก EA ลงกราฟใหม่** |
+| `HTTP 401` | token ผิดหรือหมดอายุ | Issue token ใหม่ในข้อ 1.2 แล้ววางใหม่ |
+| `HTTP 429` | โควตาข้อความหมด | ดูหัวข้อโควตาด้านล่าง |
+| ไม่มี error แต่ไม่ได้ข้อความ | ยังไม่ได้เพิ่ม OA เป็นเพื่อน | สแกน QR ในข้อ 1.3 |
+| `symbol XXX not found` | ชื่อไม่ตรงโบรกเกอร์ | แก้ตามชื่อจริงใน Market Watch (ข้อ 4) |
+| ได้ข้อความซ้ำ 2 ชุด | ลาก EA หลายกราฟ | ลบออกให้เหลือกราฟเดียว |
+| ไม่มีสัญญาณเลยหลายวัน | **ปกติตามดีไซน์** | ดู Status บน dashboard ว่ารออะไร ถ้าอยากถี่ขึ้นดูข้อ 8 |
+| Compile error | Include ไม่ครบ | ตรวจว่าคัดลอกโฟลเดอร์ `CapitalGuard` ครบทุกไฟล์ |
 
-## 9. FAQ / ปัญหาที่พบบ่อย
+### โควตาข้อความ LINE
+แผนฟรี (Communication) = **500 ข้อความ/เดือน** และ **broadcast นับตามจำนวนผู้ติดตาม**
+(ผู้ติดตาม 10 คน ส่ง 1 ครั้ง = ใช้ 10 ข้อความ)
 
-**EA ไม่เปิดออเดอร์/ไม่มีสัญญาณเลยหลายวัน** — ปกติ ตามดีไซน์ ดูบรรทัด `Status:` บน dashboard จะบอกเหตุผลปัจจุบัน (คะแนนไม่ถึง / ติดขั้นไหนของ SMC pipeline / นอก session / นอก kill zone / ติดข่าว)
+- **ใช้คนเดียว** → ไม่มีปัญหา (3 สัญญาณ/วัน × ~4 ข้อความ ≈ 360/เดือน)
+- **มีผู้ติดตามหลายคน** → ใส่ userId ตัวเองใน `InpLineUserId` เพื่อส่งเฉพาะตัวเอง (นับ 1 ข้อความ/ครั้งเสมอ)
+  หา userId ได้ที่ LINE Developers → แท็บ **Basic settings** → **Your user ID** (ขึ้นต้นด้วย `U`)
 
-**Order failed: Invalid stops** — โบรกเกอร์มี stops level กว้างกว่าปกติ ระบบกันไว้แล้วแต่ถ้าเจอ ให้เพิ่ม `InpMinSLAtrMult`
+---
 
-**Order failed: No money** — margin ไม่พอ ตรวจ leverage และประเภทบัญชี (ควรเป็น Micro)
+## ข้อควรระวังก่อนใช้จริง
 
-**อยากให้เทรดถี่ขึ้น** — ลด `InpScoreThreshold` เป็น 85 หรือปิด checklist บางข้อ **แต่ต้อง backtest ใหม่ทุกครั้งก่อนใช้จริง** อย่าแก้ค่าบนบัญชีจริงโดยตรง
-
-**เปลี่ยนไป symbol อื่น** — ได้ (EA อ่าน symbol จากกราฟ) แต่ต้อง: เปลี่ยน `InpNewsCurrencies` ให้ตรงคู่เงิน, ปรับ `InpMaxSpreadPoints`, และ backtest ใหม่ทั้งหมด
-
-**Global Variables ค้าง** — ระบบเก็บ peak equity / R ของ position ใน terminal global variables (F3 ใน MT5 ดูได้ ชื่อขึ้นต้น `CG_`) ลบได้ถ้าต้องการ reset drawdown tracking (ระวัง: จะ reset circuit breaker ด้วย)
-
-## 10. สิ่งที่ระบบนี้ไม่ทำ (โดยตั้งใจ)
-
-- ไม่ Martingale, ไม่ Grid, ไม่เฉลี่ยขาดทุน, ไม่ย้าย SL ออกห่าง (โค้ดอนุญาตให้ SL ขยับเข้าหากำไรเท่านั้น)
-- ไม่เปิดออเดอร์ไม่มี SL/TP — ไม่มีเส้นทางในโค้ดที่ทำได้
-- ไม่เทรดตอนข่าวแรง ไม่เทรดนอก session ไม่เทรดสเปรดกว้าง
-- ไม่รับประกันกำไร — ระบบที่ดีที่สุดคือระบบที่คุณ backtest เองจนเชื่อสถิติของมัน
+1. **เปิดสังเกตเฉย ๆ ก่อน 1–2 สัปดาห์** ดูว่าสัญญาณสมเหตุสมผลไหม ก่อนเอาไปเทรดเงินจริง
+2. **บริหารความเสี่ยงเอง** — แนะนำไม่เกิน 1% ของพอร์ตต่อไม้ คำนวณ lot จากระยะ SL เสมอ
+3. **ตั้ง SL/TP ในออเดอร์ทันทีตอนเปิด** ระบบไม่ปิดออเดอร์ให้
+4. **สัญญาณคือความน่าจะเป็น ไม่ใช่ความแน่นอน** ไม่มีระบบไหนชนะ 100%
+5. ระบบนี้เป็นเครื่องมือช่วยวิเคราะห์ **ไม่ใช่คำแนะนำการลงทุน**
