@@ -111,7 +111,13 @@ def _from_twelvedata(symbol: str, timeframe: str, api_key: str,
     df = df.set_index("datetime").sort_index()
     for col in ("open", "high", "low", "close"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["volume"] = pd.to_numeric(df.get("volume", 0), errors="coerce").fillna(0.0)
+    # Spot FX and metals carry no exchange volume, so Twelve Data omits the
+    # column entirely for them. df.get() would hand back the scalar default
+    # rather than a Series, which is not something fillna can be called on.
+    if "volume" in df.columns:
+        df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
+    else:
+        df["volume"] = 0.0
     return df[["open", "high", "low", "close", "volume"]].dropna()
 
 
