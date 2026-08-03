@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import pandas as pd
@@ -33,7 +34,9 @@ TWELVEDATA_SYMBOLS = {
 }
 
 YAHOO_SYMBOLS = {
-    "XAUUSD": "GC=F",           # COMEX gold futures - tracks spot closely
+    # spot gold, not the COMEX future - futures carry a basis of several
+    # dollars against spot, which showed up as "prices look wrong"
+    "XAUUSD": "XAUUSD=X",
     "EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X",
     "USDCHF": "USDCHF=X", "AUDUSD": "AUDUSD=X", "NZDUSD": "NZDUSD=X",
     "USDCAD": "USDCAD=X",
@@ -42,10 +45,20 @@ YAHOO_SYMBOLS = {
 }
 
 # --- timeframe translation --------------------------------------------
-TWELVEDATA_INTERVALS = {"M15": "15min", "H1": "1h", "H4": "4h", "D1": "1day"}
-YAHOO_INTERVALS = {"M15": "15m", "H1": "1h", "H4": "1h", "D1": "1d"}
-# Yahoo has no native 4h bars, so H4 is resampled from 1h.
-YAHOO_PERIODS = {"M15": "5d", "H1": "60d", "H4": "60d", "D1": "1y"}
+TWELVEDATA_INTERVALS = {
+    "M1": "1min", "M5": "5min", "M15": "15min", "M30": "30min",
+    "H1": "1h", "H4": "4h", "D1": "1day", "W1": "1week",
+}
+YAHOO_INTERVALS = {
+    "M1": "1m", "M5": "5m", "M15": "15m", "M30": "30m",
+    "H1": "1h", "H4": "1h", "D1": "1d", "W1": "1wk",
+}
+# Yahoo has no native 4h bars, so H4 is resampled from its hourly series.
+YAHOO_PERIODS = {
+    "M1": "5d", "M5": "5d", "M15": "5d", "M30": "1mo",
+    "H1": "60d", "H4": "60d", "D1": "1y", "W1": "5y",
+}
+RESAMPLE_RULE = {"H4": "4h"}      # timeframe -> pandas rule, when derived
 
 _TD_URL = "https://api.twelvedata.com/time_series"
 _YF_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
@@ -120,8 +133,9 @@ def _from_yahoo(symbol: str, timeframe: str) -> pd.DataFrame:
     df = df.dropna().sort_index()
 
     # Yahoo has no 4-hour bars - build them from the hourly series
-    if timeframe == "H4":
-        df = df.resample("4h").agg({
+    rule = RESAMPLE_RULE.get(timeframe)
+    if rule:
+        df = df.resample(rule).agg({
             "open": "first", "high": "max", "low": "min",
             "close": "last", "volume": "sum",
         }).dropna()
@@ -157,6 +171,43 @@ def load(symbol: str, timeframe: str, api_key: Optional[str] = None) -> pd.DataF
     raise DataError(f"{symbol} {timeframe}: " + "; ".join(errors))
 
 
+class Cache:
+    """Per-run cache of loaded series.
+
+    Profiles overlap heavily - H1 is used by all three - so without this
+    a single scan would re-download the same candles several times.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, pause: float = 0.0):
+        self.api_key = api_key
+        self.pause = pause
+        self._store: dict[tuple[str, str], pd.DataFrame] = {}
+        self._errors: dict[tuple[str, str], str] = {}
+
+    def get(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        key = (symbol, timeframe)
+        if key in self._store:
+            return self._store[key]
+        if key in self._errors:                 # don't retry a known failure
+            raise DataError(self._errors[key])
+        try:
+            df = load(symbol, timeframe, self.api_key)
+        except DataError as exc:
+            self._errors[key] = str(exc)
+            raise
+        self._store[key] = df
+        if self.pause:
+            time.sleep(self.pause)
+        return df
+
+    def frames(self, symbol: str, timeframes: list[str]) -> dict[str, pd.DataFrame]:
+        """Load every timeframe a profile needs, reusing anything cached."""
+        return {tf: self.get(symbol, tf) for tf in timeframes}
+
+    def stats(self) -> str:
+        return f"{len(self._store)} series cached, {len(self._errors)} failed"
+
+
 def load_multi(symbol: str, timeframes: list[str],
                api_key: Optional[str] = None,
                pause: float = 0.0) -> dict[str, pd.DataFrame]:
@@ -176,3 +227,23 @@ def load_multi(symbol: str, timeframes: list[str],
 def current_price(df: pd.DataFrame) -> float:
     """Latest close available (the forming bar)."""
     return float(df["close"].iloc[-1])
+
+
+# how stale a feed may be, per timeframe, before it is worth flagging.
+# Free feeds are typically delayed a little; well beyond this means the
+# series has actually stopped updating.
+_STALE_LIMIT_MIN = {"M1": 15, "M5": 30, "M15": 60, "M30": 120,
+                    "H1": 180, "H4": 600, "D1": 2880, "W1": 20160}
+
+
+def freshness(df: pd.DataFrame, timeframe: str) -> tuple:
+    """(age_in_minutes, is_stale) of the most recent bar.
+
+    Lets the briefing state plainly how current the quotes are instead of
+    presenting delayed data as if it were live.
+    """
+    if df.empty:
+        return float("inf"), True
+    last = df.index[-1].to_pydatetime()
+    age = (datetime.now(timezone.utc) - last).total_seconds() / 60.0
+    return age, age > _STALE_LIMIT_MIN.get(timeframe, 120)

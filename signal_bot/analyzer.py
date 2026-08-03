@@ -17,6 +17,8 @@ import pandas as pd
 
 from . import smc as S
 from .config import Settings
+from .data import freshness
+from .profiles import Profile
 
 
 @dataclass
@@ -35,6 +37,7 @@ class Candidate:
     rr: float
     score: float
     timeframe: str
+    profile: str = "day"           # trading style this setup belongs to
     bar_time: str = ""             # entry bar the setup formed on
     reasons: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -51,6 +54,7 @@ class Rejection:
     symbol: str
     stage: str
     detail: str
+    profile: str = "day"
 
 
 @dataclass
@@ -62,9 +66,13 @@ class MarketView:
     still waiting for a setup.
     """
     symbol: str
+    profile: str = "day"
     price: float = 0.0
     atr: float = 0.0
-    # structure per timeframe: "UP" / "DOWN" / "SIDE"
+    # structure per timeframe: "UP" / "DOWN" / "SIDE".
+    # tf_names carries the actual timeframe each slot refers to, since
+    # every profile reads a different ladder.
+    tf_names: tuple = ("D1", "H4", "H1", "M15")
     trend_d1: str = S.SIDEWAYS
     trend_h4: str = S.SIDEWAYS
     trend_h1: str = S.SIDEWAYS
@@ -91,6 +99,8 @@ class MarketView:
     steps_passed: int = 0
     waiting: str = ""
     score: float = 0.0
+    data_age_min: float = 0.0        # how old the newest candle is
+    data_stale: bool = False
 
 
 def _clamp(value: float) -> float:
@@ -193,23 +203,28 @@ def _score_indicator(direction: int, entry_df: pd.DataFrame, h1_df: pd.DataFrame
 
 
 def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
-            cfg: Settings) -> tuple[Optional[Candidate], Optional[Rejection], MarketView]:
+            cfg: Settings, prof: Profile
+            ) -> tuple[Optional[Candidate], Optional[Rejection], MarketView]:
     """Run the full SMC pipeline for one symbol.
 
     Always returns a MarketView describing the current chart, plus either
     a Candidate (every step passed and the score cleared the threshold)
     or a Rejection naming the step that stopped it.
     """
-    entry_tf = cfg.entry_timeframe
-    d1_df, h4_df, h1_df = frames["D1"], frames["H4"], frames["H1"]
+    entry_tf = prof.entry_tf
+    d1_df = frames[prof.htf_major]        # sets the overall bias
+    h4_df = frames[prof.htf_mid]
+    h1_df = frames[prof.htf_minor]
     entry_df = frames[entry_tf]
 
-    view = MarketView(symbol=symbol)
+    view = MarketView(symbol=symbol, profile=prof.name)
+    view.tf_names = (prof.htf_major, prof.htf_mid, prof.htf_minor, entry_tf)
     view.price = float(entry_df["close"].iloc[-1])
+    view.data_age_min, view.data_stale = freshness(entry_df, entry_tf)
 
     def reject(stage: str, detail: str):
         view.waiting = detail
-        return None, Rejection(symbol, stage, detail), view
+        return None, Rejection(symbol, stage, detail, prof.name), view
 
     # --- structure on every timeframe ---------------------------------
     st_d1 = S.analyse_structure(d1_df, cfg.swing_bars, cfg.struct_lookback)
@@ -225,7 +240,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     # STEP 1: direction from structure
     direction = _decide_direction(st_d1, st_h4, st_h1)
     if direction == 0:
-        return reject("1-structure", "โครงสร้าง D1/H4/H1 ไม่ตรงกัน")
+        return reject("1-structure", f"โครงสร้าง {prof.htf_major}/{prof.htf_mid}/{prof.htf_minor} ไม่ตรงกัน")
     is_buy = direction > 0
     view.direction = direction
     view.steps_passed = 1
@@ -253,32 +268,33 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         return reject("2-liquidity", "ไม่มี liquidity pool ฝั่งกำไร")
 
     # STEP 3+4: BOS / CHoCH
-    if cfg.require_bos_choch:
+    if cfg.gate("REQUIRE_BOS_CHOCH", prof.require_bos_choch):
         if not (st_entry.bias == direction and (st_entry.recent_bos or st_entry.recent_choch)):
             return reject("3-bos", "ยังไม่มี BOS/CHoCH ในทิศทางเทรด")
     view.steps_passed = 4
 
     # STEP 5: order block
     ob = sm.ob_bull if is_buy else sm.ob_bear
-    if cfg.require_order_block:
+    if cfg.gate("REQUIRE_ORDER_BLOCK", prof.require_order_block):
         if not ob.valid:
             return reject("5-orderblock", "ไม่พบ order block")
-        if ob.quality < cfg.min_ob_quality:
-            return reject("5-orderblock", f"OB คุณภาพ {ob.quality:.0f} < {cfg.min_ob_quality:.0f}")
+        min_q = cfg.number("MIN_OB_QUALITY", prof.min_ob_quality)
+        if ob.quality < min_q:
+            return reject("5-orderblock", f"OB คุณภาพ {ob.quality:.0f} < {min_q:.0f}")
     view.steps_passed = 5
 
     # STEP 6: fair value gap
-    if cfg.require_fvg and not (sm.fvg_bull if is_buy else sm.fvg_bear):
+    if cfg.gate("REQUIRE_FVG", prof.require_fvg) and not (sm.fvg_bull if is_buy else sm.fvg_bear):
         return reject("6-fvg", "ไม่พบ FVG ในทิศทางเทรด")
     view.steps_passed = 6
 
     # STEP 7: liquidity sweep must already have happened
-    if cfg.require_sweep and not (sm.sweep_bull if is_buy else sm.sweep_bear):
+    if cfg.gate("REQUIRE_SWEEP", prof.require_sweep) and not (sm.sweep_bull if is_buy else sm.sweep_bear):
         return reject("7-sweep", "ยังไม่เกิด liquidity sweep")
     view.steps_passed = 7
 
     # STEP 8: premium / discount (+ optional OTE)
-    if cfg.require_premium_discount:
+    if cfg.gate("REQUIRE_PREMIUM_DISCOUNT", prof.require_premium_discount):
         if is_buy and sm.range_pos > cfg.discount_max:
             return reject("8-zone", f"ราคาอยู่โซน premium ({sm.range_pos:.2f}) ไม่ซื้อ")
         if not is_buy and sm.range_pos < 1 - cfg.discount_max:
@@ -289,12 +305,22 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     view.steps_passed = 8
 
     # STEP 9: mitigation
-    if cfg.require_mitigation:
+    if cfg.gate("REQUIRE_MITIGATION", prof.require_mitigation):
         mitigating = (ob.valid and ob.mitigating) or (
             sm.fvg_bull_mitigated if is_buy else sm.fvg_bear_mitigated)
         if not mitigating:
             return reject("9-mitigation", "ราคายังไม่กลับมา mitigate OB/FVG")
     view.steps_passed = 9
+
+    # STEP 10: lower-timeframe confirmation - the faster charts this
+    # profile watches must not be running the other way
+    for tf in prof.confirm_tfs:
+        conf_df = frames.get(tf)
+        if conf_df is None:
+            continue
+        if S.ema_trend(conf_df) == -direction:
+            return reject("10-confirm", f"{tf} สวนทิศทาง")
+    view.steps_passed = 10
 
     # --- SL / TP plan --------------------------------------------------
     price = float(entry_df["close"].iloc[-1])
@@ -306,9 +332,9 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         sl_level = st_entry.last_high + buffer if st_entry.last_high > 0 else 0.0
         sl_dist = sl_level - price if sl_level > 0 else 0.0
     if sl_dist <= 0:
-        sl_dist = atr_value * cfg.atr_mult_sl
-    sl_dist = max(sl_dist, atr_value * cfg.min_sl_atr)
-    sl_dist = min(sl_dist, atr_value * cfg.max_sl_atr)
+        sl_dist = atr_value * prof.atr_mult_sl
+    sl_dist = max(sl_dist, atr_value * prof.min_sl_atr)
+    sl_dist = min(sl_dist, atr_value * prof.max_sl_atr)
 
     # --- confidence score ----------------------------------------------
     parts = {
@@ -324,7 +350,8 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     total = sum(parts[k] * weights[k] for k in parts) / sum(weights.values())
 
     view.score = round(total, 1)
-    threshold = cfg.score_threshold + (cfg.tier3_extra if tier == 3 else 0.0)
+    threshold = (cfg.number("SCORE_THRESHOLD", prof.score_threshold)
+                 + (cfg.tier3_extra if tier == 3 else 0.0))
     if total < threshold:
         return reject("10-score", f"คะแนน {total:.1f} < {threshold:.0f}")
     view.steps_passed = 11
@@ -344,14 +371,15 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         symbol=symbol, tier=tier, direction=direction,
         entry=r(price), entry_low=r(zone_low), entry_high=r(zone_high),
         sl=r(price - sl_dist if is_buy else price + sl_dist),
-        tp1=r(price + sl_dist * cfg.tp1_r if is_buy else price - sl_dist * cfg.tp1_r),
-        tp2=r(price + sl_dist * cfg.tp2_r if is_buy else price - sl_dist * cfg.tp2_r),
-        tp3=r(price + sl_dist * cfg.tp3_r if is_buy else price - sl_dist * cfg.tp3_r),
-        rr=cfg.tp2_r, score=round(total, 1), timeframe=entry_tf, scores=parts,
-        bar_time=str(entry_df.index[-2]),
+        tp1=r(price + sl_dist * prof.tp_r[0] if is_buy else price - sl_dist * prof.tp_r[0]),
+        tp2=r(price + sl_dist * prof.tp_r[1] if is_buy else price - sl_dist * prof.tp_r[1]),
+        tp3=r(price + sl_dist * prof.tp_r[2] if is_buy else price - sl_dist * prof.tp_r[2]),
+        rr=prof.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
+        profile=prof.name, bar_time=str(entry_df.index[-2]),
     )
 
-    bias = f"D1:{st_d1.trend} H4:{st_h4.trend} H1:{st_h1.trend}"
+    bias = (f"{prof.htf_major}:{st_d1.trend} {prof.htf_mid}:{st_h4.trend} "
+            f"{prof.htf_minor}:{st_h1.trend}")
     cand.reasons.append(f"Market Structure: {bias}")
     if st_entry.recent_bos:
         cand.reasons.append("BOS ✔")
@@ -374,4 +402,6 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     cand.notes.append(f"รอแท่งเทียน {entry_tf} ปิดยืนยันก่อนเข้า")
     cand.notes.append(f"ยกเลิกสัญญาณหากราคาปิดเลย SL ({cand.sl}) ก่อนเข้าไม้")
     cand.notes.append("หลีกเลี่ยงการเข้าใกล้ช่วงประกาศข่าวสำคัญ")
+    if prof.note:
+        cand.notes.append(prof.note)
     return cand, None, view

@@ -96,6 +96,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
           # --- ค่าที่ปรับได้ผ่าน Variables (ไม่ตั้งก็ใช้ค่าเริ่มต้น) ---
+          PROFILES: ${{ vars.PROFILES }}
           TIER1_SYMBOLS: ${{ vars.TIER1_SYMBOLS }}
           TIER2_SYMBOLS: ${{ vars.TIER2_SYMBOLS }}
           TIER3_SYMBOLS: ${{ vars.TIER3_SYMBOLS }}
