@@ -121,3 +121,94 @@ def format_status(rejections, active: int, today: int, errors) -> str:
         for err in errors[:5]:
             lines.append(f"• {_esc(err)}")
     return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------
+# Market briefing: what the chart looks like right now, sent on a timer
+# whether or not any setup qualifies.
+# ----------------------------------------------------------------------
+_TREND_LABEL = {"UP": "ขาขึ้น ▲", "DOWN": "ขาลง ▼", "SIDE": "ออกข้าง ↔"}
+_TOTAL_STEPS = 11
+
+
+def _fmt(value: float, symbol: str) -> str:
+    """Price formatting that suits the instrument."""
+    digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
+    return f"{value:.{digits}f}"
+
+
+def _trend(label: str) -> str:
+    return _TREND_LABEL.get(label, label)
+
+
+def format_briefing(views, active: int, today: int) -> str:
+    """One message covering every analysed symbol.
+
+    Reports trend across timeframes, the levels that matter, and how far
+    each symbol has moved through the entry pipeline - so the market can
+    be followed continuously instead of only when a signal fires.
+    """
+    lines = ["📈 <b>วิเคราะห์กราฟ — ภาพรวมตลาด</b>",
+             f"<i>สัญญาณวันนี้ {today} · กำลังติดตาม {active}</i>"]
+
+    # symbols closest to a signal first - that is what needs attention
+    for v in sorted(views, key=lambda x: -x.steps_passed):
+        lines.append("━━━━━━━━━━━━━━")
+        lines.append(f"📊 <b>{_esc(v.symbol)}</b>  @ <b>{_fmt(v.price, v.symbol)}</b>")
+
+        # --- trend across timeframes ---------------------------------
+        lines.append(f"แนวโน้ม: D1 {_trend(v.trend_d1)} | H4 {_trend(v.trend_h4)}")
+        lines.append(f"　　　　 H1 {_trend(v.trend_h1)} | เข้า {_trend(v.trend_entry)}")
+        if v.direction:
+            lines.append(f"ทิศทางที่ระบบมอง: <b>{'BUY' if v.direction > 0 else 'SELL'}</b>")
+        else:
+            lines.append("ทิศทาง: <i>ยังไม่ชัด (TF ไม่ตรงกัน)</i>")
+
+        # --- levels that matter --------------------------------------
+        if v.swing_high > 0 or v.swing_low > 0:
+            hi = _fmt(v.swing_high, v.symbol) if v.swing_high else "-"
+            lo = _fmt(v.swing_low, v.symbol) if v.swing_low else "-"
+            lines.append(f"🔺 แนวต้าน/BSL: <b>{hi}</b>" + ("  (Equal Highs)" if v.equal_highs else ""))
+            lines.append(f"🔻 แนวรับ/SSL: <b>{lo}</b>" + ("  (Equal Lows)" if v.equal_lows else ""))
+
+        # --- premium / discount --------------------------------------
+        zone_icon = {"Discount": "🟢", "Premium": "🔴"}.get(v.zone, "⚪")
+        lines.append(f"{zone_icon} โซน: <b>{v.zone}</b> (rangePos {v.range_pos:.2f})")
+
+        # --- smart money state ---------------------------------------
+        marks = []
+        if v.recent_bos:
+            marks.append("BOS ✔")
+        if v.recent_choch:
+            marks.append("CHoCH ✔")
+        if v.sweep_bull:
+            marks.append("Sweep ล่าง ✔")
+        if v.sweep_bear:
+            marks.append("Sweep บน ✔")
+        if v.fvg:
+            marks.append("FVG ✔" + (" (mitigated)" if v.fvg_mitigated else ""))
+        if marks:
+            lines.append("🧠 " + " · ".join(marks))
+
+        if v.ob_zone:
+            bottom, top, quality = v.ob_zone
+            state = "ราคาอยู่ในโซนแล้ว" if v.ob_mitigating else "รอราคากลับมา"
+            lines.append(f"🎯 Order Block: <b>{_fmt(bottom, v.symbol)} – {_fmt(top, v.symbol)}</b>")
+            lines.append(f"　 คุณภาพ {quality:.0f}/100 · {state}")
+
+        if v.atr:
+            lines.append(f"📏 ATR: {_fmt(v.atr, v.symbol)}")
+
+        # --- pipeline progress ---------------------------------------
+        bar = "█" * v.steps_passed + "░" * (_TOTAL_STEPS - v.steps_passed)
+        lines.append(f"ความคืบหน้า: {bar} {v.steps_passed}/{_TOTAL_STEPS}")
+        if v.score:
+            lines.append(f"คะแนนล่าสุด: <b>{v.score:.0f}</b>/100")
+        if v.waiting:
+            near = "🔥 " if v.steps_passed >= 8 else "⏳ "
+            lines.append(f"{near}{_esc(v.waiting)}")
+
+    lines.append("━━━━━━━━━━━━━━")
+    lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด — "
+                 "ระบบจะแจ้งแยกต่างหากเมื่อมีจุดเข้าครบเงื่อนไข</i>")
+    return "\n".join(lines)

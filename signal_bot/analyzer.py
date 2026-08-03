@@ -53,6 +53,46 @@ class Rejection:
     detail: str
 
 
+@dataclass
+class MarketView:
+    """What the market looks like right now for one symbol.
+
+    Produced on every pass, whether or not a signal qualifies, so the
+    briefing can report trend and key zones even while the pipeline is
+    still waiting for a setup.
+    """
+    symbol: str
+    price: float = 0.0
+    atr: float = 0.0
+    # structure per timeframe: "UP" / "DOWN" / "SIDE"
+    trend_d1: str = S.SIDEWAYS
+    trend_h4: str = S.SIDEWAYS
+    trend_h1: str = S.SIDEWAYS
+    trend_entry: str = S.SIDEWAYS
+    direction: int = 0               # agreed structure direction, 0 = conflict
+    # key liquidity levels
+    swing_high: float = 0.0          # resistance / buy-side liquidity
+    swing_low: float = 0.0           # support / sell-side liquidity
+    equal_highs: bool = False
+    equal_lows: bool = False
+    # position inside the dealing range
+    range_pos: float = 0.5
+    zone: str = "Equilibrium"
+    # smart-money state
+    recent_bos: bool = False
+    recent_choch: bool = False
+    sweep_bull: bool = False
+    sweep_bear: bool = False
+    ob_zone: tuple = ()               # (bottom, top, quality) of the relevant OB
+    ob_mitigating: bool = False
+    fvg: bool = False
+    fvg_mitigated: bool = False
+    # how far through the pipeline this symbol got
+    steps_passed: int = 0
+    waiting: str = ""
+    score: float = 0.0
+
+
 def _clamp(value: float) -> float:
     return max(0.0, min(100.0, value))
 
@@ -153,18 +193,23 @@ def _score_indicator(direction: int, entry_df: pd.DataFrame, h1_df: pd.DataFrame
 
 
 def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
-            cfg: Settings) -> tuple[Optional[Candidate], Optional[Rejection]]:
+            cfg: Settings) -> tuple[Optional[Candidate], Optional[Rejection], MarketView]:
     """Run the full SMC pipeline for one symbol.
 
-    Returns (candidate, None) when every step passes and the score clears
-    the tier threshold, otherwise (None, rejection).
+    Always returns a MarketView describing the current chart, plus either
+    a Candidate (every step passed and the score cleared the threshold)
+    or a Rejection naming the step that stopped it.
     """
     entry_tf = cfg.entry_timeframe
     d1_df, h4_df, h1_df = frames["D1"], frames["H4"], frames["H1"]
     entry_df = frames[entry_tf]
 
+    view = MarketView(symbol=symbol)
+    view.price = float(entry_df["close"].iloc[-1])
+
     def reject(stage: str, detail: str):
-        return None, Rejection(symbol, stage, detail)
+        view.waiting = detail
+        return None, Rejection(symbol, stage, detail), view
 
     # --- structure on every timeframe ---------------------------------
     st_d1 = S.analyse_structure(d1_df, cfg.swing_bars, cfg.struct_lookback)
@@ -172,17 +217,38 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     st_h1 = S.analyse_structure(h1_df, cfg.swing_bars, cfg.struct_lookback)
     st_entry = S.analyse_structure(entry_df, cfg.swing_bars, cfg.struct_lookback)
 
+    view.trend_d1, view.trend_h4 = st_d1.trend, st_h4.trend
+    view.trend_h1, view.trend_entry = st_h1.trend, st_entry.trend
+    view.swing_high, view.swing_low = st_entry.last_high, st_entry.last_low
+    view.recent_bos, view.recent_choch = st_entry.recent_bos, st_entry.recent_choch
+
     # STEP 1: direction from structure
     direction = _decide_direction(st_d1, st_h4, st_h1)
     if direction == 0:
         return reject("1-structure", "โครงสร้าง D1/H4/H1 ไม่ตรงกัน")
     is_buy = direction > 0
+    view.direction = direction
+    view.steps_passed = 1
 
     # STEP 2: liquidity map
     atr_value = S.atr(entry_df, cfg.atr_period)
     if atr_value <= 0:
         return reject("2-liquidity", "คำนวณ ATR ไม่ได้")
+    view.atr = atr_value
     sm = S.analyse_smart_money(entry_df, st_entry, atr_value, cfg.smc_window)
+    ob_view = sm.ob_bull if is_buy else sm.ob_bear
+    view.equal_highs, view.equal_lows = sm.equal_highs, sm.equal_lows
+    view.range_pos = sm.range_pos
+    view.zone = ("Discount" if sm.range_pos < 0.45
+                 else "Premium" if sm.range_pos > 0.55 else "Equilibrium")
+    view.sweep_bull, view.sweep_bear = sm.sweep_bull, sm.sweep_bear
+    if ob_view.valid:
+        view.ob_zone = (ob_view.bottom, ob_view.top, ob_view.quality)
+        view.ob_mitigating = ob_view.mitigating
+    view.fvg = sm.fvg_bull if is_buy else sm.fvg_bear
+    view.fvg_mitigated = sm.fvg_bull_mitigated if is_buy else sm.fvg_bear_mitigated
+    view.steps_passed = 2
+
     if cfg.require_liquidity_target and not (sm.bsl_above if is_buy else sm.ssl_below):
         return reject("2-liquidity", "ไม่มี liquidity pool ฝั่งกำไร")
 
@@ -190,6 +256,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     if cfg.require_bos_choch:
         if not (st_entry.bias == direction and (st_entry.recent_bos or st_entry.recent_choch)):
             return reject("3-bos", "ยังไม่มี BOS/CHoCH ในทิศทางเทรด")
+    view.steps_passed = 4
 
     # STEP 5: order block
     ob = sm.ob_bull if is_buy else sm.ob_bear
@@ -198,14 +265,17 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
             return reject("5-orderblock", "ไม่พบ order block")
         if ob.quality < cfg.min_ob_quality:
             return reject("5-orderblock", f"OB คุณภาพ {ob.quality:.0f} < {cfg.min_ob_quality:.0f}")
+    view.steps_passed = 5
 
     # STEP 6: fair value gap
     if cfg.require_fvg and not (sm.fvg_bull if is_buy else sm.fvg_bear):
         return reject("6-fvg", "ไม่พบ FVG ในทิศทางเทรด")
+    view.steps_passed = 6
 
     # STEP 7: liquidity sweep must already have happened
     if cfg.require_sweep and not (sm.sweep_bull if is_buy else sm.sweep_bear):
         return reject("7-sweep", "ยังไม่เกิด liquidity sweep")
+    view.steps_passed = 7
 
     # STEP 8: premium / discount (+ optional OTE)
     if cfg.require_premium_discount:
@@ -216,6 +286,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     in_ote = (0.21 <= sm.range_pos <= 0.38) if is_buy else (0.62 <= sm.range_pos <= 0.79)
     if cfg.require_ote and not in_ote:
         return reject("8-ote", "ไม่อยู่ในโซน OTE")
+    view.steps_passed = 8
 
     # STEP 9: mitigation
     if cfg.require_mitigation:
@@ -223,6 +294,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
             sm.fvg_bull_mitigated if is_buy else sm.fvg_bear_mitigated)
         if not mitigating:
             return reject("9-mitigation", "ราคายังไม่กลับมา mitigate OB/FVG")
+    view.steps_passed = 9
 
     # --- SL / TP plan --------------------------------------------------
     price = float(entry_df["close"].iloc[-1])
@@ -251,9 +323,12 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     weights = cfg.weights
     total = sum(parts[k] * weights[k] for k in parts) / sum(weights.values())
 
+    view.score = round(total, 1)
     threshold = cfg.score_threshold + (cfg.tier3_extra if tier == 3 else 0.0)
     if total < threshold:
         return reject("10-score", f"คะแนน {total:.1f} < {threshold:.0f}")
+    view.steps_passed = 11
+    view.waiting = "พร้อมเข้า — ผ่านครบทุกขั้น"
 
     # --- build the candidate -------------------------------------------
     digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
@@ -299,4 +374,4 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     cand.notes.append(f"รอแท่งเทียน {entry_tf} ปิดยืนยันก่อนเข้า")
     cand.notes.append(f"ยกเลิกสัญญาณหากราคาปิดเลย SL ({cand.sl}) ก่อนเข้าไม้")
     cand.notes.append("หลีกเลี่ยงการเข้าใกล้ช่วงประกาศข่าวสำคัญ")
-    return cand, None
+    return cand, None, view

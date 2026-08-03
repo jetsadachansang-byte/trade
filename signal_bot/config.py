@@ -116,6 +116,9 @@ class Settings:
 
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
+    # รายงานวิเคราะห์กราฟทุกกี่นาที (0 = ปิด). สแกนทุก 5 นาทีแต่รายงาน
+    # ทุก 5 นาทีจะได้ ~288 ข้อความ/วัน จึงตั้งค่าเริ่มต้นไว้ที่ 60 นาที
+    briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 60))
 
     # --- scoring weights ---------------------------------------------------
     weights: dict[str, float] = field(default_factory=lambda: {
