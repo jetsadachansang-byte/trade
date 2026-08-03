@@ -113,6 +113,13 @@ class Settings:
         default_factory=lambda: _env_list("GOLD_SYMBOLS", "XAUUSD"))
     gold_daily_target: int = field(
         default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 4))
+    # Gold spot comes from Twelve Data, whose free plan allows 800 requests
+    # a day. Gold needs 8 series per scan, so scanning it every 5 minutes
+    # like the pairs would need ~2,300 - well over the limit. Every 15
+    # minutes costs 8 x 96 = 768/day, which fits. Raise this if the log
+    # ever shows quota errors.
+    gold_scan_minutes: int = field(
+        default_factory=lambda: _env_int("GOLD_SCAN_MINUTES", 15))
     adaptive_threshold: bool = field(
         default_factory=lambda: _env_bool("ADAPTIVE_THRESHOLD", True))
     min_score_floor: float = field(
