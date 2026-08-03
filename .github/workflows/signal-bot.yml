@@ -35,11 +35,48 @@ jobs:
       - name: ดึงโค้ด
         uses: actions/checkout@v4
 
+      # ตรวจ Secrets ก่อนทำอย่างอื่น จะได้รู้สาเหตุทันทีถ้าตั้งค่าไม่ครบ
+      - name: ตรวจว่าตั้งค่า Secrets ครบหรือยัง
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          missing=""
+          [ -z "$TELEGRAM_BOT_TOKEN" ] && missing="$missing TELEGRAM_BOT_TOKEN"
+          [ -z "$TELEGRAM_CHAT_ID" ] && missing="$missing TELEGRAM_CHAT_ID"
+
+          if [ -n "$missing" ]; then
+            echo "::error title=ยังไม่ได้ตั้งค่า Secrets::ขาด:$missing"
+            echo ""
+            echo "==================================================="
+            echo " ยังไม่ได้ใส่ Secrets เหล่านี้:$missing"
+            echo "==================================================="
+            echo ""
+            echo " วิธีแก้ (ทำบนมือถือได้):"
+            echo " 1. ไปที่หน้า repo -> More -> Settings"
+            echo " 2. เมนูซ้าย -> Secrets and variables -> Actions"
+            echo " 3. กด New repository secret"
+            echo " 4. เพิ่มทีละตัว (พิมพ์ชื่อตัวใหญ่ให้ตรงเป๊ะ):"
+            echo "      TELEGRAM_BOT_TOKEN = token จาก @BotFather"
+            echo "      TELEGRAM_CHAT_ID   = เลข Id จาก @userinfobot"
+            echo " 5. กลับมาหน้านี้แล้วกด Run workflow ใหม่"
+            echo ""
+            exit 1
+          fi
+
+          # ตรวจรูปแบบคร่าว ๆ กันสลับค่ากัน (ไม่พิมพ์ค่าจริงออก log)
+          case "$TELEGRAM_BOT_TOKEN" in
+            *:*) ;;
+            *) echo "::warning::TELEGRAM_BOT_TOKEN ไม่มีเครื่องหมาย ':' — อาจใส่สลับกับ CHAT_ID" ;;
+          esac
+          echo "Secrets ครบแล้ว (token ${#TELEGRAM_BOT_TOKEN} ตัวอักษร, chat id ${#TELEGRAM_CHAT_ID} ตัวอักษร)"
+
       - name: ติดตั้ง Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: signal_bot/requirements.txt
 
       - name: ติดตั้ง dependencies
         run: pip install -r signal_bot/requirements.txt
@@ -69,13 +106,19 @@ jobs:
           MIN_OB_QUALITY: ${{ vars.MIN_OB_QUALITY }}
           SEND_STATUS_REPORT: ${{ vars.SEND_STATUS_REPORT }}
           REQUEST_PAUSE: ${{ vars.REQUEST_PAUSE }}
+          # ตัวเลือกจากปุ่ม Run workflow
+          RUN_STATUS: ${{ inputs.status }}
+          RUN_IGNORE_HOURS: ${{ inputs.ignore_hours }}
         run: |
-          python -m signal_bot.main \
-            ${{ inputs.status && '--status' || '' }} \
-            ${{ inputs.ignore_hours && '--ignore-hours' || '' }}
+          args=""
+          [ "$RUN_STATUS" = "true" ] && args="$args --status"
+          [ "$RUN_IGNORE_HOURS" = "true" ] && args="$args --ignore-hours"
+          echo "รันคำสั่ง: python -m signal_bot.main $args"
+          python -m signal_bot.main $args
 
       - name: บันทึกสถานะสัญญาณกลับเข้า repo
         # ต้องทำเพื่อให้รอบถัดไปรู้ว่ามีสัญญาณไหนกำลังติดตามอยู่
+        if: always()
         run: |
           if [ -n "$(git status --porcelain signal_state.json)" ]; then
             git config user.name "capitalguard-bot"
