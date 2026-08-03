@@ -67,7 +67,9 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         f"🎯 Take Profit 2: {cand.tp2}",
         f"🎯 Take Profit 3: {cand.tp3}",
         f"📉 Risk : Reward = 1 : {cand.rr:.1f}",
-        f"⭐ Confidence Score: <b>{cand.score:.0f}%</b>",
+        f"⭐ Confidence Score: <b>{cand.score:.0f}%</b>  "
+        f"· เกรด <b>{_esc(getattr(cand, 'grade', '-'))}</b>",
+        f"💰 {_esc(_GRADE_ADVICE.get(getattr(cand, 'grade', ''), ''))}",
         f"⏱ ระยะเวลาถือที่คาด: {_esc(cand.hold_time or '-')}",
         "━━━━━━━━━━━━━━",
         "🧠 <b>เหตุผลในการวิเคราะห์:</b>",
@@ -136,6 +138,12 @@ def format_status(rejections, active: int, today: int, errors) -> str:
 # ----------------------------------------------------------------------
 _TREND_LABEL = {"UP": "ขาขึ้น ▲", "DOWN": "ขาลง ▼", "SIDE": "ออกข้าง ↔"}
 _PROFILE_TAG = {"turbo": "🔥M1", "scalp": "⚡M5", "day": "📊M15", "trend": "🚀H1"}
+_GRADE_ADVICE = {
+    "A+": "คุณภาพสูงสุด — ขนาดไม้ปกติ",
+    "A": "คุณภาพดี — ขนาดไม้ปกติ",
+    "B": "คุณภาพปานกลาง — ลดขนาดไม้เหลือ 50-70%",
+    "C": "คุณภาพต่ำ — ลดขนาดไม้เหลือ 30-50% หรือข้ามไม้นี้",
+}
 _TOTAL_STEPS = 11
 
 

@@ -63,7 +63,7 @@ class Settings:
 
     # --- trading styles ----------------------------------------------
     profiles: list[str] = field(default_factory=lambda: _env_list(
-        "PROFILES", "scalp,day,trend"))
+        "PROFILES", "turbo,scalp,day,trend"))
 
     # --- symbol universe (priority order matters) --------------------
     tier1: list[str] = field(default_factory=lambda: _env_list("TIER1_SYMBOLS", "XAUUSD"))
@@ -81,6 +81,17 @@ class Settings:
     max_signals_per_day: int = field(default_factory=lambda: _env_int("MAX_SIGNALS_PER_DAY", 0))
     max_signals_per_run: int = field(default_factory=lambda: _env_int("MAX_SIGNALS_PER_RUN", 0))
     cooldown_minutes: int = field(default_factory=lambda: _env_int("COOLDOWN_MINUTES", 0))
+    # --- adaptive threshold ------------------------------------------
+    # Target signals per day. The market does not produce setups on
+    # schedule, so this cannot be a guarantee - it lowers the score bar
+    # when the day is running behind, never below the floor, and every
+    # signal is graded so a relaxed one is visibly a relaxed one.
+    daily_signal_target: int = field(
+        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 7))
+    adaptive_threshold: bool = field(
+        default_factory=lambda: _env_bool("ADAPTIVE_THRESHOLD", True))
+    min_score_floor: float = field(
+        default_factory=lambda: _env_float("MIN_SCORE_FLOOR", 68.0))
     signal_expiry_hours: int = field(default_factory=lambda: _env_int("SIGNAL_EXPIRY_HOURS", 12))
 
     # --- SMC pipeline gates --------------------------------------------

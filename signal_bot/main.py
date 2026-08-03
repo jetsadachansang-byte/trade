@@ -112,6 +112,37 @@ def track_open_signals(state: State, tg: notifier.Telegram,
                     f"เกินเวลา {expiry} ชม. โดยไม่ถึง TP1", sig.id))
 
 
+def adaptive_threshold(cfg: Settings, state: State, now: datetime,
+                       base: float) -> tuple:
+    """Lower the score bar when the day is running behind its target.
+
+    Signals still have to pass every structural gate; only the score
+    requirement moves, and never below `min_score_floor`. Returns
+    (threshold, explanation) so the run log says what it did and why.
+
+    This is a pacing aid, not a guarantee: on a quiet day the pipeline
+    gates alone can keep the count under target, and that is the correct
+    outcome rather than something to force.
+    """
+    if not cfg.adaptive_threshold or cfg.daily_signal_target <= 0:
+        return base, ""
+
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    hours_elapsed = max(0.5, (now - day_start).total_seconds() / 3600)
+    expected = cfg.daily_signal_target * min(1.0, hours_elapsed / 24.0)
+    issued = state.issued_today(now)
+    deficit = expected - issued
+    if deficit <= 0:
+        return base, f"on pace ({issued} issued, {expected:.1f} expected)"
+
+    # how far behind, as a fraction of the whole daily target
+    shortfall = min(1.0, deficit / max(1, cfg.daily_signal_target))
+    relaxed = base - (base - cfg.min_score_floor) * shortfall
+    relaxed = max(cfg.min_score_floor, relaxed)
+    return relaxed, (f"behind pace ({issued}/{expected:.1f}) "
+                     f"-> threshold {base:.0f} lowered to {relaxed:.0f}")
+
+
 class Hold:
     """A qualifying setup held back by a rate limit (for the status report)."""
 
@@ -122,8 +153,8 @@ class Hold:
 
 def scan(state: State, tg: notifier.Telegram, cfg: Settings,
          now: datetime, cache: market_data.Cache,
-         news_ctx=None, session: str = "",
-         in_kz: bool = False) -> tuple[list, list[str], list]:
+         news_ctx=None, session: str = "", in_kz: bool = False,
+         threshold: float = None) -> tuple[list, list[str], list]:
     """Analyse the universe and issue any qualifying signals.
 
     Returns (rejections, errors, views) - views always covers every
@@ -147,7 +178,8 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
                 continue
 
             cand, rejection, view = analyse(
-                symbol, tier, frames, cfg, prof, news_ctx, session, in_kz)
+                symbol, tier, frames, cfg, prof, news_ctx, session, in_kz,
+                threshold)
             views.append(view)
             if rejection:
                 rejections.append(rejection)
@@ -240,8 +272,15 @@ def main(argv: list[str] | None = None) -> int:
     elif news_ctx is not None and news_ctx.blocking and not args.ignore_hours:
         print(f"news blackout: {news_ctx.blocking_reason} - no scan")
     else:
+        # base bar is the strictest profile's; each profile still applies
+        # its own, so this only ever relaxes, never tightens
+        base_bar = max(p.score_threshold for p in resolve_profiles(cfg.profiles))
+        bar, why = adaptive_threshold(cfg, state, now, base_bar)
+        if why:
+            print(f"pacing: {why}")
         rejections, errors, views = scan(
-            state, tg, cfg, now, cache, news_ctx, session, in_kz)
+            state, tg, cfg, now, cache, news_ctx, session, in_kz,
+            bar if cfg.adaptive_threshold else None)
 
     # --- chart briefing: the running commentary on the market ---------
     due = (cfg.briefing_minutes > 0
