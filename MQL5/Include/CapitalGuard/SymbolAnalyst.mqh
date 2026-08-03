@@ -347,8 +347,11 @@ public:
          if(isBuy ? smc.fvgBullMitigated : smc.fvgBearMitigated) reasons += " (mitigated)";
          reasons += "\n";
         }
-      reasons += StringFormat("• %s Zone ✔ (rangePos %.2f)%s\n",
-                              isBuy ? "Discount" : "Premium", smc.rangePos,
+      //--- describe the zone price is actually in, not the one we hoped for
+      string zoneName   = (smc.rangePos <= 0.5) ? "Discount" : "Premium";
+      bool   favourable = isBuy ? (smc.rangePos <= 0.5) : (smc.rangePos >= 0.5);
+      reasons += StringFormat("• %s Zone %s (rangePos %.2f)%s\n",
+                              zoneName, favourable ? "✔" : "⚠️", smc.rangePos,
                               ote ? " | OTE ✔" : "");
       reasons += StringFormat("• Regime: %s / %s",
                               CRegimeDetector::RegimeName(m_regime.regime),
