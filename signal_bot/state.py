@@ -39,6 +39,12 @@ class Signal:
     created: str                       # ISO-8601 UTC
     profile: str = ""                  # trading style that produced it
     expiry_hours: int = 0              # 0 = fall back to the global setting
+    # institutional context, kept so LEVEL 3/7 can learn from the outcome
+    regime: str = ""
+    strategies: list = field(default_factory=list)
+    scores: dict = field(default_factory=dict)
+    win_probability: float = 0.0
+    expected_value: float = 0.0
     bar_time: str = ""                 # entry bar this signal came from
     status: str = ACTIVE
     tp1_hit: bool = False
@@ -65,6 +71,7 @@ class State:
     last_signal_at: str = ""           # ISO-8601 UTC, "" when none yet
     last_briefing_at: str = ""         # ISO-8601 UTC of the last chart briefing
     last_gold_scan_at: str = ""        # gold runs on its own slower clock
+    macro: dict = field(default_factory=dict)   # LEVEL 1 snapshot, refreshed hourly
 
     # --- persistence -------------------------------------------------
     @classmethod
@@ -78,7 +85,8 @@ class State:
         signals = [Signal(**item) for item in raw.get("signals", [])]
         return cls(signals=signals, last_signal_at=raw.get("last_signal_at", ""),
                    last_briefing_at=raw.get("last_briefing_at", ""),
-                   last_gold_scan_at=raw.get("last_gold_scan_at", ""))
+                   last_gold_scan_at=raw.get("last_gold_scan_at", ""),
+                   macro=raw.get("macro", {}))
 
     def save(self, path: Path = STATE_FILE) -> None:
         # keep the file small: drop finished signals older than 30 days
@@ -90,6 +98,7 @@ class State:
             "last_signal_at": self.last_signal_at,
             "last_briefing_at": self.last_briefing_at,
             "last_gold_scan_at": self.last_gold_scan_at,
+            "macro": self.macro,
             "signals": [asdict(s) for s in keep],
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),

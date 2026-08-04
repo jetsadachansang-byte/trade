@@ -15,7 +15,11 @@ from typing import Optional
 
 import pandas as pd
 
+from . import macro as MACRO
+from . import probability as PROB
+from . import regime as REG
 from . import smc as S
+from . import strategy as STRAT
 from .config import Settings
 from .data import freshness
 from .profiles import Profile
@@ -45,6 +49,20 @@ class Candidate:
     notes: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)   # what could break this plan
     scores: dict[str, float] = field(default_factory=dict)
+    # --- LEVEL 9: what the desk needs on the ticket ------------------
+    regime: str = ""               # market regime this was taken in
+    regime_confidence: float = 0.0
+    strategies: list = field(default_factory=list)   # approaches actually used
+    weights: dict = field(default_factory=dict)      # the dynamic weighting used
+    strategy_why: str = ""
+    win_probability: float = 0.0
+    prob_source: str = "model"
+    expected_value: float = 0.0
+    expected_rr: float = 0.0
+    macro_note: str = ""
+    memory_note: str = ""
+    approval: str = ""
+    invalidation: str = ""
 
     @property
     def side(self) -> str:
@@ -107,6 +125,10 @@ class MarketView:
     price_note: str = ""             # set when the feed is not the spot market
     news_verified: bool = False      # False = calendar could not be reached
     news_note: str = ""
+    regime: str = ""
+    regime_confidence: float = 0.0
+    regime_evidence: list = field(default_factory=list)
+    strategies: list = field(default_factory=list)
 
 
 def _clamp(value: float) -> float:
@@ -294,7 +316,9 @@ def _score_spread(session: str, vol_state: str) -> float:
 def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
             cfg: Settings, prof: Profile, news_ctx=None,
             session: str = "", in_kill_zone: bool = False,
-            threshold_override: Optional[float] = None
+            threshold_override: Optional[float] = None,
+            macro_view=None, learned: Optional[dict] = None,
+            signals: Optional[list] = None
             ) -> tuple[Optional[Candidate], Optional[Rejection], MarketView]:
     """Run the full SMC pipeline for one symbol.
 
@@ -357,6 +381,13 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         view.ob_mitigating = ob_view.mitigating
     view.fvg = sm.fvg_bull if is_buy else sm.fvg_bear
     view.fvg_mitigated = sm.fvg_bull_mitigated if is_buy else sm.fvg_bear_mitigated
+
+    # --- LEVEL 2: what kind of market is this --------------------------
+    news_active = bool(news_ctx is not None and getattr(news_ctx, "upcoming", None))
+    reg = REG.detect(entry_df, st_entry, sm, atr_value, news_active)
+    view.regime, view.regime_confidence = reg.name, reg.confidence
+    view.regime_evidence = list(reg.evidence)
+    view.strategies = list(STRAT.select(reg, learned)[0])
     view.steps_passed = 2
 
     if cfg.require_liquidity_target and not (sm.bsl_above if is_buy else sm.ssl_below):
@@ -484,10 +515,38 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         rr=prof.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
         profile=prof.name, grade=grade_for(total), hold_time=prof.hold_time,
         bar_time=str(entry_df.index[-2]),
+        regime=reg.name, regime_confidence=reg.confidence,
+        strategies=list(strategies), weights=dict(weights),
+        strategy_why=strategy_why, macro_note=macro_why,
+        memory_note=recall.note,
     )
+
+    # --- LEVEL 6: is this trade actually worth the risk? ----------------
+    news_clear = not (news_ctx is not None and getattr(news_ctx, "upcoming", None))
+    odds = PROB.assess(total, threshold, prof.tp_r, recall,
+                       macro_agrees=(1 if macro_dir == direction and macro_dir else
+                                     -1 if macro_dir == -direction and macro_dir else 0),
+                       news_clear=news_clear)
+    cand.win_probability = odds.win_probability
+    cand.prob_source = odds.source
+    cand.expected_value = odds.expected_value
+    cand.expected_rr = odds.expected_rr
+    cand.invalidation = (
+        f"ราคาปิด{'ต่ำกว่า' if is_buy else 'สูงกว่า'} {cand.sl} บน {entry_tf} "
+        f"= โครงสร้างเสีย ยกเลิกแผนนี้ทั้งหมด")
+
+    # --- LEVEL 10: would a portfolio manager sign this off? -------------
+    news_blocking = bool(news_ctx is not None and getattr(news_ctx, "blocking", False))
+    approved, verdict = PROB.approve(odds, reg, 11, 11, news_blocking)
+    cand.approval = verdict
+    if not approved:
+        view.waiting = f"ไม่ผ่านการอนุมัติ: {verdict}"
+        return None, Rejection(symbol, "11-approval", verdict, prof.name), view
 
     bias = (f"{prof.htf_major}:{st_d1.trend} {prof.htf_mid}:{st_h4.trend} "
             f"{prof.htf_minor}:{st_h1.trend}")
+    cand.reasons.append(f"สภาพตลาด: {reg.name} (มั่นใจ {reg.confidence:.0f}%)")
+    cand.reasons.append(f"กลยุทธ์ที่เลือกใช้: {', '.join(strategies)}")
     cand.reasons.append(f"Market Structure: {bias}")
     if st_entry.recent_bos:
         cand.reasons.append("BOS ✔")
