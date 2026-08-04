@@ -169,10 +169,9 @@ class Settings:
 
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
-    # รายงานวิเคราะห์กราฟทุกกี่นาที (0 = ปิด). ตั้งเท่ากับ GOLD_SCAN_MINUTES
-    # เพื่อให้รายงานตรงกับรอบที่สแกนทองพอดี ทองจึงอยู่ในรายงานทุกครั้ง
-    # (~96 รายงาน/วัน ถ้ามากไปให้ตั้ง BRIEFING_MINUTES เป็น 30 หรือ 60)
-    briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 15))
+    # รายงานวิเคราะห์กราฟทุกกี่นาที (0 = ปิด). ส่งแยกข้อความละ 1 คู่เทรด
+    # จึงได้ ~8 ข้อความต่อรอบ — ทุกชั่วโมงคือ ~192 ข้อความ/วัน
+    briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 60))
     # แจ้ง "ยังไม่มีจุดเข้า" ทุกกี่นาที (0 = ปิด) - ต่อท้ายรายงานภาพรวม
     no_setup_notice: bool = field(default_factory=lambda: _env_bool("NO_SETUP_NOTICE", True))
 

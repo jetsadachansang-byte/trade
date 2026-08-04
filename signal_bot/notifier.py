@@ -363,6 +363,188 @@ def format_briefing(views, active: int, today: int, counts=None,
     return "\n".join(lines)
 
 
+def _smc_story(v, direction: int) -> list:
+    """What smart money has actually done on this chart, in plain Thai.
+
+    Everything here is read off the structure - never off an indicator,
+    which by design can only confirm, never lead.
+    """
+    out = []
+    if v.recent_bos:
+        out.append("<b>BOS</b> — โครงสร้างถูกเบรกต่อเนื่อง แรงฝั่งเดิมยังอยู่")
+    if v.recent_choch:
+        out.append("<b>CHoCH</b> — โครงสร้างเปลี่ยนทิศ เป็นสัญญาณกลับตัว "
+                   "(ถ้าไม่ไปต่ออาจเป็นสัญญาณหลอก)")
+    if v.sweep_bull:
+        out.append("<b>กวาดสภาพคล่องฝั่งล่างแล้ว</b> — ลากลง ล้าง stop "
+                   "ใต้แนวรับ แล้วดึงกลับ มักตามด้วยการขึ้น")
+    if v.sweep_bear:
+        out.append("<b>กวาดสภาพคล่องฝั่งบนแล้ว</b> — ดันขึ้น ล้าง stop "
+                   "เหนือแนวต้าน แล้วกดกลับ มักตามด้วยการลง")
+    if v.equal_highs:
+        out.append("มี <b>Equal Highs</b> ด้านบน — เป็นกองสภาพคล่องที่ราคามักวิ่งไปกวาด")
+    if v.equal_lows:
+        out.append("มี <b>Equal Lows</b> ด้านล่าง — เป็นกองสภาพคล่องที่ราคามักวิ่งไปกวาด")
+    if v.ob_zone:
+        state = ("ราคาเข้ามาในโซนแล้ว" if v.ob_mitigating
+                 else "ราคายังไม่กลับมาที่โซน")
+        out.append(f"<b>Order Block</b> คุณภาพ {v.ob_zone[2]:.0f}/100 — {state}")
+    if v.fvg:
+        state = "ถูกเติมเต็มแล้ว" if v.fvg_mitigated else "ยังไม่ถูกเติมเต็ม"
+        out.append(f"<b>Fair Value Gap</b> ในทิศทางเทรด — {state}")
+    zone_note = {
+        "Discount": "ราคาอยู่ <b>ครึ่งล่างของกรอบ</b> — ฝั่งได้เปรียบของคนซื้อ",
+        "Premium": "ราคาอยู่ <b>ครึ่งบนของกรอบ</b> — ฝั่งได้เปรียบของคนขาย",
+    }.get(v.zone, "ราคาอยู่ <b>กลางกรอบ</b> — ยังไม่ได้เปรียบฝั่งไหน")
+    out.append(f"{zone_note} (rangePos {v.range_pos:.2f})")
+    if not direction:
+        out.append("⚠️ ไทม์เฟรมใหญ่ยังขัดกัน — โครงสร้างยังไม่เลือกทาง")
+    return out
+
+
+def _levels(v, symbol: str) -> list:
+    """The prices that decide what happens next."""
+    out = []
+    if v.swing_high:
+        out.append(f"🔺 แนวต้าน / สภาพคล่องฝั่งบน: <b>{_fmt(v.swing_high, symbol)}</b>")
+    if v.swing_low:
+        out.append(f"🔻 แนวรับ / สภาพคล่องฝั่งล่าง: <b>{_fmt(v.swing_low, symbol)}</b>")
+    if v.ob_zone:
+        bottom, top, _ = v.ob_zone
+        out.append(f"🎯 โซน Order Block: <b>{_fmt(bottom, symbol)} – {_fmt(top, symbol)}</b>")
+    if v.atr:
+        out.append(f"📏 ATR ({v.tf_names[3]}): {_fmt(v.atr, symbol)}")
+    return out
+
+
+def _scenarios(v, symbol: str, direction: int) -> list:
+    """If price goes here, do this - written for the bias the structure gives.
+
+    These are conditional plans, not instructions to trade: the system
+    analyses and reports, it never places an order.
+    """
+    hi = _fmt(v.swing_high, symbol) if v.swing_high else None
+    lo = _fmt(v.swing_low, symbol) if v.swing_low else None
+    ob = (f"{_fmt(v.ob_zone[0], symbol)} – {_fmt(v.ob_zone[1], symbol)}"
+          if v.ob_zone else None)
+    out = []
+
+    if direction > 0:
+        if ob:
+            out.append(f"▼ <b>ย่อลงมาที่ {ob}</b> (โซน OB)\n"
+                       f"　 → โซนที่ระบบรอเข้า <b>BUY</b> "
+                       f"รอแท่ง {v.tf_names[3]} ปิดยืนยันก่อน อย่าเข้าสวนขณะกำลังลง")
+        if hi:
+            out.append(f"▲ <b>ขึ้นถึง {hi}</b> (แนวต้าน)\n"
+                       f"　 → ชนกองสภาพคล่องฝั่งบน ถ้ายังไม่เข้าไม้ <b>อย่าไล่ราคา</b> "
+                       f"รอเบรกแล้วย่อกลับมาทดสอบค่อยพิจารณา")
+        if lo:
+            out.append(f"⛔ <b>ปิดต่ำกว่า {lo}</b>\n"
+                       f"　 → โครงสร้างขาขึ้นเสีย <b>ยกเลิกแผนซื้อทั้งหมด</b> "
+                       f"รอโครงสร้างใหม่ก่อน")
+    elif direction < 0:
+        if ob:
+            out.append(f"▲ <b>เด้งขึ้นมาที่ {ob}</b> (โซน OB)\n"
+                       f"　 → โซนที่ระบบรอเข้า <b>SELL</b> "
+                       f"รอแท่ง {v.tf_names[3]} ปิดยืนยันก่อน อย่าเข้าสวนขณะกำลังขึ้น")
+        if lo:
+            out.append(f"▼ <b>ลงถึง {lo}</b> (แนวรับ)\n"
+                       f"　 → ชนกองสภาพคล่องฝั่งล่าง ถ้ายังไม่เข้าไม้ <b>อย่าไล่ราคา</b> "
+                       f"รอเบรกแล้วเด้งกลับมาทดสอบค่อยพิจารณา")
+        if hi:
+            out.append(f"⛔ <b>ปิดสูงกว่า {hi}</b>\n"
+                       f"　 → โครงสร้างขาลงเสีย <b>ยกเลิกแผนขายทั้งหมด</b> "
+                       f"รอโครงสร้างใหม่ก่อน")
+    else:
+        if hi and lo:
+            out.append(f"↔ ตอนนี้แกว่งในกรอบ <b>{lo} – {hi}</b> — ยังไม่มีฝั่งได้เปรียบ")
+            out.append(f"▲ <b>ปิดเหนือ {hi}</b> → เอียงไปทางขาขึ้น เริ่มมองหาจังหวะ BUY")
+            out.append(f"▼ <b>ปิดต่ำกว่า {lo}</b> → เอียงไปทางขาลง เริ่มมองหาจังหวะ SELL")
+        out.append("⏳ ระหว่างนี้ <b>ยังไม่ควรเข้าไม้</b> — เข้าในกรอบคือการเดา")
+    return out
+
+
+def _verdict(v, direction: int) -> tuple:
+    """(label, reason) - what to do with this symbol right now."""
+    if v.steps_passed >= _TOTAL_STEPS:
+        side = "BUY" if direction > 0 else "SELL"
+        return (f"เข้า {side} ได้",
+                "ผ่านครบทุกขั้น — ดูรายละเอียดในข้อความสัญญาณที่ส่งแยก")
+    if not direction:
+        return ("รอ", "ไทม์เฟรมใหญ่ยังขัดกัน ยังไม่มีทิศทางที่เชื่อถือได้")
+    side = "BUY" if direction > 0 else "SELL"
+    if v.steps_passed >= 9:
+        return (f"เตรียม {side}",
+                f"ผ่าน {v.steps_passed}/{_TOTAL_STEPS} ขั้น — "
+                f"{v.waiting or 'รอเงื่อนไขสุดท้าย'}")
+    return ("รอ", f"ผ่าน {v.steps_passed}/{_TOTAL_STEPS} ขั้น — "
+                  f"{v.waiting or 'ยังไม่ครบเงื่อนไข'}")
+
+
+def format_symbol_report(symbol: str, views, counts=None,
+                         primary: bool = False) -> str:
+    """One message for one instrument: what is happening and what to do.
+
+    Sent per symbol rather than merged, so each pair can be read - and
+    acted on - on its own without scrolling past the others.
+    """
+    short = [v for v in views if not _is_long_hold(getattr(v, "profile", ""))]
+    long_ = [v for v in views if _is_long_hold(getattr(v, "profile", ""))]
+    best = max(short or views, key=lambda v: v.steps_passed)
+    direction = best.direction
+
+    mark = "🥇" if primary else "📊"
+    stamp = datetime.now(timezone.utc).strftime("%d/%m %H:%M")
+    lines = [f"{mark} <b>{_esc(symbol)}</b> · <b>{_fmt(best.price, symbol)}</b>",
+             f"<i>{stamp} UTC</i>"]
+    if counts:
+        gold_today, gold_target, pair_today, pair_target = counts
+        lines.append(f"<i>สัญญาณวันนี้ · ทอง {gold_today}/{gold_target} · "
+                     f"คู่เงิน {pair_today}/{pair_target}</i>")
+    if getattr(best, "price_note", ""):
+        lines.append(f"⚠️ <i>{_esc(best.price_note)}</i>")
+    elif getattr(best, "data_stale", False):
+        lines.append(f"⚠️ <i>ข้อมูลช้า {best.data_age_min:.0f} นาที — เทียบราคากับกระดานก่อน</i>")
+
+    # --- trend across every timeframe --------------------------------
+    lines += ["", "📈 <b>แนวโน้มแต่ละไทม์เฟรม</b>",
+              _tf_row(_tf_trends(short or views), TF_ORDER)]
+    if long_:
+        lines.append(_tf_row(_tf_trends(long_), TF_ORDER_LONG) + "  <i>(สายยาว)</i>")
+    bias = {1: "BUY", -1: "SELL"}.get(direction, "ยังไม่ชัด")
+    lines.append(f"ทิศทางที่โครงสร้างบอก: <b>{bias}</b>")
+
+    # --- what smart money did ----------------------------------------
+    lines += ["", "🧠 <b>ตอนนี้เกิดอะไรขึ้น</b>"]
+    lines += [f"• {s}" for s in _smc_story(best, direction)]
+
+    # --- levels -------------------------------------------------------
+    levels = _levels(best, symbol)
+    if levels:
+        lines += ["", "📍 <b>ระดับราคาสำคัญ</b>"] + levels
+
+    # --- conditional plan ---------------------------------------------
+    lines += ["", "🗺️ <b>ถ้าราคาไปถึงตรงนี้ ควรทำอะไร</b>"]
+    lines += _scenarios(best, symbol, direction)
+
+    # --- verdict -------------------------------------------------------
+    label, reason = _verdict(best, direction)
+    lines += ["", f"⚖️ <b>ตอนนี้ควร: {label}</b>", f"<i>{_esc(reason)}</i>"]
+
+    if long_:
+        lv = max(long_, key=lambda v: v.steps_passed)
+        llabel, lreason = _verdict(lv, lv.direction)
+        lines.append(f"🚀 <i>สายถือยาว: {llabel} — {_esc(lreason)}</i>")
+
+    if not getattr(best, "news_verified", True):
+        lines.append("📰 <i>ไม่สามารถยืนยันข่าวล่าสุดได้ — ไม่ใช้ข่าวประกอบการตัดสินใจ</i>")
+
+    lines += ["━━━━━━━━━━━━━━",
+              "<i>วิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุน · "
+              "ระบบไม่เปิดออเดอร์เอง · เสี่ยงไม่เกิน 1% ต่อไม้</i>"]
+    return "\n".join(lines)
+
+
 def format_no_setup(news_ctx, views) -> str:
     """The message the spec asks for when nothing qualifies.
 

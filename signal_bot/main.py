@@ -354,18 +354,33 @@ def main(argv: list[str] | None = None) -> int:
         due = False
 
     if views and (due or args.brief):
-        tg.send(notifier.format_briefing(
-            views, len(state.live()), state.issued_today(now),
-            counts=(state.issued_today(now, symbols=gold),
-                    cfg.gold_daily_target,
-                    state.issued_today(now, exclude=gold),
-                    cfg.pair_daily_target),
-            primary=gold))
+        counts = (state.issued_today(now, symbols=gold), cfg.gold_daily_target,
+                  state.issued_today(now, exclude=gold), cfg.pair_daily_target)
+
+        # One message per instrument, not one combined report: each pair is
+        # a separate decision and reads better without the others in the way.
+        by_symbol: dict = {}
+        for v in views:
+            by_symbol.setdefault(v.symbol, []).append(v)
+
+        def order(item):
+            symbol, group = item
+            # gold leads, then whichever symbol is closest to a signal
+            return (symbol not in gold, -max(v.steps_passed for v in group))
+
+        first = True
+        for symbol, group in sorted(by_symbol.items(), key=order):
+            tg.send(notifier.format_symbol_report(
+                symbol, group,
+                counts=counts if first else None,   # daily tally once, not 8x
+                primary=symbol in gold))
+            first = False
+
         # the spec's explicit "nothing qualifies right now" statement
         if cfg.no_setup_notice and not any(v.steps_passed >= 11 for v in views):
             tg.send(notifier.format_no_setup(news_ctx, views))
         state.last_briefing_at = now.isoformat(timespec="seconds")
-        print(f"briefing sent for {len(views)} symbol(s)")
+        print(f"briefing sent for {len(by_symbol)} symbol(s)")
 
     state.save()
 
