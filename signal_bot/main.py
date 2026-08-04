@@ -22,6 +22,7 @@ from . import macro as macro_feed
 from . import memory as memory_bank
 from . import news as news_feed
 from . import notifier
+from . import review as day_review
 from .analyzer import analyse
 from .config import Settings
 from .profiles import resolve as resolve_profiles
@@ -65,6 +66,17 @@ def market_open(now: datetime) -> bool:
     return True
 
 
+def _close(sig: Signal, now: datetime, reason: str) -> None:
+    """Stamp a finished signal so the daily review can date its result.
+
+    Without this the review can only see when a signal was issued, which
+    files a Monday entry that stopped out on Wednesday under Monday.
+    """
+    if not sig.closed_at:
+        sig.closed_at = now.isoformat(timespec="seconds")
+        sig.close_reason = reason
+
+
 def track_open_signals(state: State, tg: notifier.Telegram,
                        cfg: Settings, now: datetime,
                        cache: market_data.Cache) -> None:
@@ -84,6 +96,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
         # --- stop loss (checked first: worst case wins) ----------------
         if (is_buy and low <= sig.sl) or (not is_buy and high >= sig.sl):
             sig.status = SL_HIT
+            _close(sig, now, "โดน SL")
             tg.send(notifier.format_sl(sig.symbol, sig.side, sig.sl, sig.id))
             continue
 
@@ -118,6 +131,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
                 sig.tp2_hit, sig.status = True, TP2
             else:
                 sig.tp3_hit, sig.status = True, TP3
+                _close(sig, now, "ถึง TP3 ครบแผน")
             tg.send(notifier.format_tp(sig.symbol, sig.side, level, target, sig.id))
 
         # --- expiry: never reached TP1 within the window ---------------
@@ -126,6 +140,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
             expiry = sig.expiry_hours or cfg.signal_expiry_hours
             if expiry > 0 and age_hours >= expiry:
                 sig.status = CANCELLED
+                _close(sig, now, f"หมดเวลา {expiry} ชม. โดยไม่ถึง TP1")
                 tg.send(notifier.format_cancel(
                     sig.symbol, sig.side,
                     f"เกินเวลา {expiry} ชม. โดยไม่ถึง TP1", sig.id))
@@ -307,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="always send the chart briefing this run")
     parser.add_argument("--daily", action="store_true",
                         help="send the daily market analysis now, ignoring the clock")
+    parser.add_argument("--summary", action="store_true",
+                        help="send the daily result review now, ignoring the clock")
     parser.add_argument("--ignore-hours", action="store_true",
                         help="skip market-hours and kill-zone checks (for testing)")
     args = parser.parse_args(argv)
@@ -378,6 +395,19 @@ def main(argv: list[str] | None = None) -> int:
         rejections, errors, views = scan(
             state, tg, cfg, now, cache, news_ctx, session, in_kz,
             macro_view=macro_view, learned=learned)
+
+    # --- Daily Result Review: how yesterday's signals actually did ----
+    # Sent before the planning report, so the morning reads in the order a
+    # desk works: what happened, then what to do about it.
+    if cfg.daily_summary and (args.summary
+                              or day_review.due(state, now, cfg.daily_summary_hour)):
+        rev = day_review.build(state, now, cfg.daily_summary_hour,
+                               memory_bank.summary(state.signals))
+        tg.send(notifier.format_daily_review(rev))
+        state.last_summary_date = day_review.window(
+            now, cfg.daily_summary_hour)[1].date().isoformat()
+        print(f"daily review sent: {rev.issued} issued, "
+              f"{len(rev.closed)} closed, {rev.total_r:+.2f}R")
 
     # --- Daily Market Analysis: one planning report each morning ------
     if cfg.daily_report and (args.daily

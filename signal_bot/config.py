@@ -216,6 +216,13 @@ class Settings:
     # ชั่วโมงตามเวลาไทย (Asia/Bangkok) ที่จะส่งบทวิเคราะห์
     daily_report_hour: int = field(
         default_factory=lambda: _env_int("DAILY_REPORT_HOUR", 6))
+    # --- สรุปผลรายวัน (Daily Result Review) ----------------------------
+    # ส่งตอนตี 5 ก่อนบทวิเคราะห์ 1 ชม. เพราะรอบตลาดนิวยอร์กเพิ่งปิด
+    daily_summary: bool = field(
+        default_factory=lambda: _env_bool("DAILY_SUMMARY", True))
+    daily_summary_hour: int = field(
+        default_factory=lambda: _env_int("DAILY_SUMMARY_HOUR", 5))
+
     daily_symbols: list[str] = field(default_factory=lambda: _env_list(
         "DAILY_SYMBOLS",
         "XAUUSD,EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))

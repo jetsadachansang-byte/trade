@@ -987,3 +987,76 @@ def format_daily_watchlist(reports, risk) -> str:
               "<i>บทวิเคราะห์เพื่อวางแผน ไม่ใช่คำแนะนำการลงทุน · "
               "ระบบไม่เปิดออเดอร์เอง · เสี่ยงไม่เกิน 1% ต่อไม้</i>"]
     return "\n".join(lines)
+
+
+def format_daily_review(rev) -> str:
+    """The 05:00 result review of the session that just closed."""
+    span = (f"{rev.start.strftime('%d/%m %H:%M')} – "
+            f"{rev.end.strftime('%d/%m %H:%M')} น.")
+    lines = [
+        "📋 <b>สรุปผลประจำวัน</b>",
+        f"<i>รอบ {span} (เวลาไทย · ปิดรอบตามตลาดนิวยอร์ก)</i>",
+        "━━━━━━━━━━━━━━",
+        f"📨 สัญญาณที่ส่งในรอบนี้: <b>{rev.issued}</b> ไม้",
+        f"✅ ปิดแล้ว: <b>{len(rev.closed)}</b> ไม้ · "
+        f"⏳ ยังถืออยู่: <b>{len(rev.still_open)}</b> ไม้",
+    ]
+
+    if rev.closed:
+        sign = "🟢" if rev.total_r > 0 else "🔴" if rev.total_r < 0 else "⚪"
+        lines += [
+            "━━━━━━━━━━━━━━",
+            "<b>📊 ผลของไม้ที่ปิดในรอบนี้</b>",
+            f"🎯 ชนะ {rev.wins} · แพ้ {rev.losses} · เสมอ {rev.breakeven}"
+            + (f" · หมดอายุ {rev.expired}" if rev.expired else ""),
+            f"📈 อัตราชนะ: <b>{rev.win_rate:.0f}%</b>"
+            + (f" (จาก {rev.wins + rev.losses} ไม้ที่ตัดสินผลได้)"
+               if rev.wins + rev.losses else ""),
+            f"{sign} ผลรวม: <b>{rev.total_r:+.2f}R</b> "
+            f"(โมเดลคาดไว้ {rev.expected_r:+.2f}R)",
+            "",
+            "<b>รายไม้</b>",
+        ]
+        for out in rev.closed:
+            s = out.signal
+            mark = "🟢" if out.result_r > 0.05 else "🔴" if out.result_r < -0.05 else "⚪"
+            lines.append(
+                f"{mark} <b>{_esc(s.symbol)}</b> {s.side} · <b>{out.result_r:+.2f}R</b>")
+            lines.append(f"     └ {_esc(out.label)} · เข้า {s.entry} · "
+                         f"คะแนนตอนส่ง {s.score:.0f}")
+
+    if rev.still_open:
+        lines += ["━━━━━━━━━━━━━━", "<b>⏳ ไม้ที่ยังถืออยู่</b>"]
+        for out in rev.still_open:
+            s = out.signal
+            lines.append(f"• <b>{_esc(s.symbol)}</b> {s.side} · {_esc(out.label)}"
+                         f" · SL ปัจจุบัน {s.sl}")
+
+    if rev.by_symbol and rev.closed:
+        # ASCII header: Thai glyphs do not hold a monospace column on mobile
+        rows = [f"{'Symbol':<9}{'N':>4}{'R':>9}"]
+        for sym, (n, r) in sorted(rev.by_symbol.items(), key=lambda kv: -kv[1][1]):
+            rows.append(f"{sym:<9}{n:>4}{r:>+9.2f}")
+        lines += ["━━━━━━━━━━━━━━", "<b>📌 แยกตามคู่เทรด</b>",
+                  "<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>"]
+
+    if rev.by_regime and rev.closed:
+        lines += ["<b>🌐 แยกตามสภาพตลาด</b>"]
+        for name, (n, r) in sorted(rev.by_regime.items(), key=lambda kv: -kv[1][1]):
+            lines.append(f"• {_esc(name)}: {n} ไม้ · <b>{r:+.2f}R</b>")
+
+    if rev.notes:
+        lines += ["━━━━━━━━━━━━━━", "<b>🧠 อ่านผลรอบนี้ยังไง</b>"]
+        lines += [f"• {_esc(n)}" for n in rev.notes]
+
+    if rev.all_time:
+        lines += ["", f"📚 <i>{_esc(rev.all_time)}</i>"]
+
+    lines += [
+        "━━━━━━━━━━━━━━",
+        "<i>ตัวเลข R คิดตามกฎจัดการไม้ที่ระบบแนะนำ — ปิด 1/3 ทุก TP และเลื่อน SL "
+        "มาที่จุดเข้าหลัง TP1 ไม่ใช่ผลจากบัญชีจริง ถ้าคุณจัดการไม้ต่างจากนี้ "
+        "ผลจริงของคุณจะต่างออกไป</i>",
+        "<i>ระบบไม่มีสิทธิ์เปิดออเดอร์เอง — วิเคราะห์และส่งสัญญาณเท่านั้น</i>",
+    ]
+    return "\n".join(lines)
