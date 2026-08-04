@@ -117,6 +117,11 @@ jobs:
           GOLD_SCAN_MINUTES: ${{ vars.GOLD_SCAN_MINUTES }}
           ADAPTIVE_THRESHOLD: ${{ vars.ADAPTIVE_THRESHOLD }}
           MIN_SCORE_FLOOR: ${{ vars.MIN_SCORE_FLOOR }}
+          MIN_REGIME_CONFIDENCE: ${{ vars.MIN_REGIME_CONFIDENCE }}
+          STRICT_STRUCTURE: ${{ vars.STRICT_STRUCTURE }}
+          USE_MACRO: ${{ vars.USE_MACRO }}
+          MACRO_REFRESH_MINUTES: ${{ vars.MACRO_REFRESH_MINUTES }}
+          SELF_LEARNING: ${{ vars.SELF_LEARNING }}
           COOLDOWN_MINUTES: ${{ vars.COOLDOWN_MINUTES }}
           SIGNAL_EXPIRY_HOURS: ${{ vars.SIGNAL_EXPIRY_HOURS }}
           USE_KILL_ZONES: ${{ vars.USE_KILL_ZONES }}
@@ -148,18 +153,46 @@ jobs:
 
       - name: บันทึกสถานะสัญญาณกลับเข้า repo
         # ต้องทำเพื่อให้รอบถัดไปรู้ว่ามีสัญญาณไหนกำลังติดตามอยู่
+        #
+        # เดิมใช้ `git pull --rebase` ซึ่งชน conflict ที่ signal_state.json
+        # แล้วแก้เองไม่ได้ ลูป retry ก็ชนซ้ำจนจบ step โดยที่สถานะไม่ถูกบันทึก
+        # (TP/SL ที่ติดตามอยู่ · จำนวนสัญญาณรายวัน · นาฬิกาทอง · แคชมหภาค
+        #  หายหมด) ตอนนี้เก็บไฟล์ไว้นอก repo ก่อน แล้ว reset ตาม remote
+        # ให้สะอาด จึงไม่มี conflict ให้แก้ตั้งแต่แรก
         if: always()
         run: |
-          if [ -n "$(git status --porcelain signal_state.json)" ]; then
-            git config user.name "capitalguard-bot"
-            git config user.email "bot@users.noreply.github.com"
+          if [ -z "$(git status --porcelain signal_state.json)" ]; then
+            echo "ไม่มีการเปลี่ยนแปลงสถานะ"
+            exit 0
+          fi
+
+          git config user.name "capitalguard-bot"
+          git config user.email "bot@users.noreply.github.com"
+          cp signal_state.json "$RUNNER_TEMP/signal_state.json"
+
+          saved=0
+          for attempt in 1 2 3; do
+            git fetch origin main || { sleep $((attempt * 5)); continue; }
+            git reset --hard origin/main
+            cp "$RUNNER_TEMP/signal_state.json" signal_state.json
+
+            if [ -z "$(git status --porcelain signal_state.json)" ]; then
+              echo "สถานะตรงกับ remote อยู่แล้ว"
+              saved=1
+              break
+            fi
+
             git add signal_state.json
             git commit -m "chore: update signal state [skip ci]"
-            # รอบอื่นอาจ push มาก่อน จึง rebase แล้วลองใหม่
-            for attempt in 1 2 3; do
-              git pull --rebase --autostash && git push && break
-              sleep $((attempt * 5))
-            done
-          else
-            echo "ไม่มีการเปลี่ยนแปลงสถานะ"
+            if git push; then
+              saved=1
+              break
+            fi
+            echo "push ไม่สำเร็จ (ครั้งที่ $attempt) — ลองใหม่"
+            sleep $((attempt * 5))
+          done
+
+          if [ "$saved" != "1" ]; then
+            echo "::error title=บันทึกสถานะไม่สำเร็จ::รอบถัดไปจะไม่เห็นสัญญาณที่กำลังติดตาม"
+            exit 1
           fi
