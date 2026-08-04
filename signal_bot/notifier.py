@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+from datetime import datetime, timezone
 
 import requests
 
@@ -229,144 +230,137 @@ def _is_long_hold(profile_name: str) -> bool:
     return bool(prof and prof.is_long_hold)
 
 
+TF_ORDER = ("M1", "M5", "M15", "H1", "H4", "D1")
+# the long-hold style never reads anything below H1, so listing M1-M15 here
+# would only print empty cells
+TF_ORDER_LONG = ("H1", "H4", "D1", "W1")
+_ARROW = {"UP": "▲", "DOWN": "▼", "SIDE": "↔"}
+
+
+def _tf_trends(views) -> dict:
+    """Merge every profile's ladder into one timeframe -> trend map.
+
+    Each MarketView only carries the four timeframes its own style reads,
+    so the full M1..W1 picture only exists once the styles are combined.
+    """
+    out = {}
+    for v in views:
+        names = getattr(v, "tf_names", ())
+        trends = (v.trend_d1, v.trend_h4, v.trend_h1, v.trend_entry)
+        for name, trend in zip(names, trends):
+            out.setdefault(name, trend)
+    return out
+
+
+def _tf_row(trends: dict, order) -> str:
+    """One compact line: M1▲ M5▲ M15↔ ..., '·' where a timeframe is missing."""
+    cells = []
+    for tf in order:
+        arrow = _ARROW.get(trends.get(tf, ""), "·")
+        cells.append(f"{tf}{arrow}")
+    return " ".join(cells)
+
+
+def _bias(views) -> str:
+    """Agreed direction across a symbol's styles, or '—' when they conflict."""
+    dirs = {v.direction for v in views if v.direction}
+    if dirs == {1}:
+        return "BUY"
+    if dirs == {-1}:
+        return "SELL"
+    return "—"
+
+
+def _symbol_lines(symbol, views, order, gold: bool) -> list:
+    """The 2-3 line summary for one symbol inside one set."""
+    best = max(views, key=lambda v: v.steps_passed)
+    mark = "🥇" if gold else "•"
+    zone_icon = {"Discount": "🟢", "Premium": "🔴"}.get(best.zone, "⚪")
+    tag = _PROFILE_TAG.get(getattr(best, "profile", ""), "")
+
+    lines = [f"{mark} <b>{_esc(symbol)}</b> {_fmt(best.price, symbol)} → "
+             f"<b>{_bias(views)}</b>",
+             _tf_row(_tf_trends(views), order)]
+
+    detail = (f"{zone_icon} {best.zone} {best.range_pos:.2f} · {tag} "
+              f"{best.steps_passed}/{_TOTAL_STEPS}")
+    if best.score:
+        detail += f" · {best.score:.0f}"
+    lines.append(detail)
+
+    # levels and warnings are worth the extra line on the headline symbol
+    if gold and (best.swing_high or best.swing_low):
+        hi = _fmt(best.swing_high, symbol) if best.swing_high else "-"
+        lo = _fmt(best.swing_low, symbol) if best.swing_low else "-"
+        lines.append(f"🔻 {lo} · 🔺 {hi}")
+    if getattr(best, "price_note", ""):
+        lines.append(f"⚠️ <i>{_esc(best.price_note)}</i>")
+    elif getattr(best, "data_stale", False):
+        lines.append(f"⚠️ <i>ข้อมูลช้า {best.data_age_min:.0f} นาที</i>")
+    return lines
+
+
+def _set_section(views, order, primary, header: str, note: str) -> list:
+    """One setup set: every symbol summarised, gold first."""
+    if not views:
+        return []
+    by_symbol = {}
+    for v in views:
+        by_symbol.setdefault(v.symbol, []).append(v)
+
+    def rank(item):
+        symbol, group = item
+        # gold always leads, then whoever is closest to a signal
+        return (symbol not in primary, -max(v.steps_passed for v in group))
+
+    lines = ["", header, f"<i>{note}</i>", "━━━━━━━━━━━━━━"]
+    for symbol, group in sorted(by_symbol.items(), key=rank):
+        lines.extend(_symbol_lines(symbol, group, order, symbol in primary))
+    return lines
+
+
 def format_briefing(views, active: int, today: int, counts=None,
                     primary=None) -> str:
-    """One message covering every analysed symbol.
+    """A one-page trend summary: every symbol, every timeframe.
 
-    Reports trend across timeframes, the levels that matter, and how far
-    each symbol has moved through the entry pipeline - so the market can
-    be followed continuously instead of only when a signal fires.
+    Two sets, because they are traded differently: short-term setups that
+    close within the day, and long-hold setups carried across days. Each
+    symbol takes three lines - price and agreed direction, the trend on
+    every timeframe, then zone and pipeline progress.
 
     `counts` is an optional (gold_today, gold_target, pair_today,
-    pair_target) tuple, shown so the daily pacing is visible.
-
-    `primary` is the set of headline symbols (gold). They get their own
-    section in full detail at the top and are never trimmed away by the
-    ranking, because the whole system is built around them.
+    pair_target) tuple. `primary` is the headline symbol set (gold), which
+    always leads its section.
     """
-    lines = ["📈 <b>วิเคราะห์กราฟ — ภาพรวมตลาด</b>",
+    primary = set(primary or ())
+    stamp = datetime.now(timezone.utc).strftime("%d/%m %H:%M")
+
+    lines = [f"📊 <b>สรุปแนวโน้มทุกไทม์เฟรม</b> · {stamp} UTC",
              f"<i>สัญญาณวันนี้ {today} · กำลังติดตาม {active}</i>"]
     if counts:
         gold_today, gold_target, pair_today, pair_target = counts
         lines.append(f"<i>ทอง {gold_today}/{gold_target} · "
                      f"คู่เงิน {pair_today}/{pair_target}</i>")
 
-    primary = set(primary or ())
-    head_views = [v for v in views if v.symbol in primary]
-    rest_views = [v for v in views if v.symbol not in primary]
-
-    if head_views:
-        names = " / ".join(sorted({v.symbol for v in head_views}))
-        lines.append("")
-        lines.append(f"🥇 <b>{_esc(names)} (ทองคำ) — สินทรัพย์หลัก</b>")
-        lines.extend(_briefing_block(
-            sorted(head_views, key=lambda x: -x.steps_passed)))
-    elif primary:
-        # say it outright rather than letting gold vanish without a word
-        lines.append("")
-        lines.append("🥇 <b>ทองคำ</b>")
-        lines.append("━━━━━━━━━━━━━━")
+    if primary and not any(v.symbol in primary for v in views):
         lines.append("⚠️ <i>รอบนี้ยังไม่มีข้อมูลทอง — ดึงราคาไม่สำเร็จ</i>")
 
-    short_views = [v for v in rest_views
+    short_views = [v for v in views
                    if not _is_long_hold(getattr(v, "profile", ""))]
-    long_views = [v for v in rest_views
+    long_views = [v for v in views
                   if _is_long_hold(getattr(v, "profile", ""))]
 
-    for group, header, top in ((short_views, "⚡ <b>คู่เงิน — สายเก็บสั้น (Day Trade / Scalp)</b>", 4),
-                               (long_views, "🚀 <b>คู่เงิน — สายถือยาว (Run Trend)</b>", 2)):
-        if not group:
-            continue
-        lines.append("")
-        lines.append(header)
-        # 8 symbols x 4 styles is far too much detail to read hourly, so
-        # only the ones closest to a signal get a full block; the rest are
-        # summarised one per line so nothing disappears silently
-        ranked = sorted(group, key=lambda x: -x.steps_passed)
-        lines.extend(_briefing_block(ranked[:top]))
-        rest = ranked[top:]
-        if rest:
-            lines.append("━━━━━━━━━━━━━━")
-            lines.append(f"<i>อีก {len(rest)} รายการที่ยังไม่ใกล้จุดเข้า:</i>")
-            for v in rest:
-                tag = _PROFILE_TAG.get(getattr(v, "profile", ""), "")
-                lines.append(f"• {_esc(v.symbol)} {tag} "
-                             f"{v.steps_passed}/{_TOTAL_STEPS} — {_esc(v.waiting)}")
+    lines += _set_section(
+        short_views, TF_ORDER, primary,
+        "⚡ <b>เซ็ตอัพสายเก็บสั้น</b>", "ปิดภายในวัน · M1-D1")
+    lines += _set_section(
+        long_views, TF_ORDER_LONG, primary,
+        "🚀 <b>เซ็ตอัพสายถือยาว</b>", "ถือข้ามวัน-สัปดาห์ · H1-W1")
 
     lines.append("━━━━━━━━━━━━━━")
-    lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด — "
-                 "ระบบจะแจ้งแยกต่างหากเมื่อมีจุดเข้าครบเงื่อนไข</i>")
+    lines.append("<i>▲ ขาขึ้น · ▼ ขาลง · ↔ ออกข้าง · · ไม่มีข้อมูล</i>")
+    lines.append("<i>รายงานภาพรวม ไม่ใช่สัญญาณเข้าเทรด</i>")
     return "\n".join(lines)
-
-
-def _briefing_block(views) -> list:
-    """The per-symbol detail rows of the briefing, closest to a signal first."""
-    lines = []
-    for v in sorted(views, key=lambda x: -x.steps_passed):
-        style = _PROFILE_TAG.get(getattr(v, "profile", ""), "")
-        lines.append("━━━━━━━━━━━━━━")
-        lines.append(f"📊 <b>{_esc(v.symbol)}</b> {style} @ <b>{_fmt(v.price, v.symbol)}</b>")
-        age = getattr(v, "data_age_min", 0.0)
-        if getattr(v, "data_stale", False):
-            lines.append(f"⚠️ <i>ข้อมูลช้า {age:.0f} นาที — ราคาอาจไม่ตรงกระดาน</i>")
-        elif age:
-            lines.append(f"<i>ข้อมูลอัปเดตเมื่อ {age:.0f} นาทีที่แล้ว</i>")
-        if getattr(v, "price_note", ""):
-            lines.append(f"⚠️ <i>{_esc(v.price_note)}</i>")
-
-        # --- trend across this profile's own timeframe ladder ---------
-        t1, t2, t3, t4 = getattr(v, "tf_names", ("D1", "H4", "H1", "เข้า"))
-        lines.append(f"แนวโน้ม: {t1} {_trend(v.trend_d1)} | {t2} {_trend(v.trend_h4)}")
-        lines.append(f"　　　　 {t3} {_trend(v.trend_h1)} | {t4} {_trend(v.trend_entry)}")
-        if v.direction:
-            lines.append(f"ทิศทางที่ระบบมอง: <b>{'BUY' if v.direction > 0 else 'SELL'}</b>")
-        else:
-            lines.append("ทิศทาง: <i>ยังไม่ชัด (TF ไม่ตรงกัน)</i>")
-
-        # --- levels that matter --------------------------------------
-        if v.swing_high > 0 or v.swing_low > 0:
-            hi = _fmt(v.swing_high, v.symbol) if v.swing_high else "-"
-            lo = _fmt(v.swing_low, v.symbol) if v.swing_low else "-"
-            lines.append(f"🔺 แนวต้าน/BSL: <b>{hi}</b>" + ("  (Equal Highs)" if v.equal_highs else ""))
-            lines.append(f"🔻 แนวรับ/SSL: <b>{lo}</b>" + ("  (Equal Lows)" if v.equal_lows else ""))
-
-        # --- premium / discount --------------------------------------
-        zone_icon = {"Discount": "🟢", "Premium": "🔴"}.get(v.zone, "⚪")
-        lines.append(f"{zone_icon} โซน: <b>{v.zone}</b> (rangePos {v.range_pos:.2f})")
-
-        # --- smart money state ---------------------------------------
-        marks = []
-        if v.recent_bos:
-            marks.append("BOS ✔")
-        if v.recent_choch:
-            marks.append("CHoCH ✔")
-        if v.sweep_bull:
-            marks.append("Sweep ล่าง ✔")
-        if v.sweep_bear:
-            marks.append("Sweep บน ✔")
-        if v.fvg:
-            marks.append("FVG ✔" + (" (mitigated)" if v.fvg_mitigated else ""))
-        if marks:
-            lines.append("🧠 " + " · ".join(marks))
-
-        if v.ob_zone:
-            bottom, top, quality = v.ob_zone
-            state = "ราคาอยู่ในโซนแล้ว" if v.ob_mitigating else "รอราคากลับมา"
-            lines.append(f"🎯 Order Block: <b>{_fmt(bottom, v.symbol)} – {_fmt(top, v.symbol)}</b>")
-            lines.append(f"　 คุณภาพ {quality:.0f}/100 · {state}")
-
-        if v.atr:
-            lines.append(f"📏 ATR: {_fmt(v.atr, v.symbol)}")
-
-        # --- pipeline progress ---------------------------------------
-        bar = "█" * v.steps_passed + "░" * (_TOTAL_STEPS - v.steps_passed)
-        lines.append(f"ความคืบหน้า: {bar} {v.steps_passed}/{_TOTAL_STEPS}")
-        if v.score:
-            lines.append(f"คะแนนล่าสุด: <b>{v.score:.0f}</b>/100")
-        if v.waiting:
-            near = "🔥 " if v.steps_passed >= 8 else "⏳ "
-            lines.append(f"{near}{_esc(v.waiting)}")
-    return lines
 
 
 def format_no_setup(news_ctx, views) -> str:
