@@ -36,6 +36,10 @@ on:
         description: "ส่งบทวิเคราะห์ตลาดรายวันทันที (ไม่ต้องรอ 06:00 น.)"
         type: boolean
         default: false
+      summary:
+        description: "ส่งสรุปผลรายวันทันที (ไม่ต้องรอ 05:00 น.)"
+        type: boolean
+        default: false
 
 # กันไม่ให้รันซ้อนกันจนสถานะสัญญาณเพี้ยน
 concurrency:
@@ -151,12 +155,14 @@ jobs:
           RUN_IGNORE_HOURS: ${{ inputs.ignore_hours }}
           RUN_BRIEF: ${{ inputs.brief }}
           RUN_DAILY: ${{ inputs.daily }}
+          RUN_SUMMARY: ${{ inputs.summary }}
         run: |
           args=""
           [ "$RUN_STATUS" = "true" ] && args="$args --status"
           [ "$RUN_IGNORE_HOURS" = "true" ] && args="$args --ignore-hours"
           [ "$RUN_BRIEF" = "true" ] && args="$args --brief"
           [ "$RUN_DAILY" = "true" ] && args="$args --daily"
+          [ "$RUN_SUMMARY" = "true" ] && args="$args --summary"
           echo "รันคำสั่ง: python -m signal_bot.main $args"
           python -m signal_bot.main $args
 

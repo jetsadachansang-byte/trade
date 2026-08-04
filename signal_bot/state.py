@@ -51,6 +51,10 @@ class Signal:
     trail_distance: float = 0.0        # in price, 0 = fixed exits
     trail_peak: float = 0.0            # best price reached so far
     bar_time: str = ""                 # entry bar this signal came from
+    # Closing details, so the daily review can attribute a result to the
+    # trading day it actually happened on rather than the day it was issued.
+    closed_at: str = ""                # ISO-8601 UTC, "" while still running
+    close_reason: str = ""             # short Thai description for the review
     status: str = ACTIVE
     tp1_hit: bool = False
     tp2_hit: bool = False
@@ -80,6 +84,8 @@ class State:
     # Bangkok date of the last daily analysis, so the 06:00 report goes
     # out once a morning however many times the scan runs.
     last_daily_date: str = ""
+    # Same idea for the 05:00 result review of the session that just closed.
+    last_summary_date: str = ""
 
     # --- persistence -------------------------------------------------
     @classmethod
@@ -95,7 +101,8 @@ class State:
                    last_briefing_at=raw.get("last_briefing_at", ""),
                    last_gold_scan_at=raw.get("last_gold_scan_at", ""),
                    macro=raw.get("macro", {}),
-                   last_daily_date=raw.get("last_daily_date", ""))
+                   last_daily_date=raw.get("last_daily_date", ""),
+                   last_summary_date=raw.get("last_summary_date", ""))
 
     def save(self, path: Path = STATE_FILE) -> None:
         # keep the file small: drop finished signals older than 30 days
@@ -109,6 +116,7 @@ class State:
             "last_gold_scan_at": self.last_gold_scan_at,
             "macro": self.macro,
             "last_daily_date": self.last_daily_date,
+            "last_summary_date": self.last_summary_date,
             "signals": [asdict(s) for s in keep],
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
