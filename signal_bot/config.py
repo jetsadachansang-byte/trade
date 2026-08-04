@@ -167,6 +167,14 @@ class Settings:
     news_post_min: int = field(default_factory=lambda: _env_int("NEWS_POST_MIN", 45))
     news_soft_min: int = field(default_factory=lambda: _env_int("NEWS_SOFT_MIN", 120))
 
+    # --- institutional brain (LEVEL 1 / 7) ---------------------------------
+    use_macro: bool = field(default_factory=lambda: _env_bool("USE_MACRO", True))
+    # the global tape moves slowly and costs 9 Yahoo requests, so it is
+    # refreshed on its own clock and cached in the state file between runs
+    macro_refresh_minutes: int = field(
+        default_factory=lambda: _env_int("MACRO_REFRESH_MINUTES", 60))
+    self_learning: bool = field(default_factory=lambda: _env_bool("SELF_LEARNING", True))
+
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
     # รายงานวิเคราะห์กราฟทุกกี่นาที (0 = ปิด). ส่งแยกข้อความละ 1 คู่เทรด

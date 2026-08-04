@@ -17,6 +17,8 @@ import sys
 from datetime import datetime, timezone
 
 from . import data as market_data
+from . import macro as macro_feed
+from . import memory as memory_bank
 from . import news as news_feed
 from . import notifier
 from .analyzer import analyse
@@ -161,8 +163,8 @@ class Hold:
 
 def scan(state: State, tg: notifier.Telegram, cfg: Settings,
          now: datetime, cache: market_data.Cache,
-         news_ctx=None, session: str = "", in_kz: bool = False
-         ) -> tuple[list, list[str], list]:
+         news_ctx=None, session: str = "", in_kz: bool = False,
+         macro_view=None, learned=None) -> tuple[list, list[str], list]:
     """Analyse the universe and issue any qualifying signals.
 
     Returns (rejections, errors, views) - views always covers every
@@ -218,7 +220,8 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
             bar = profile_threshold(cfg, prof, gap)
             cand, rejection, view = analyse(
                 symbol, tier, frames, cfg, prof, news_ctx, session, in_kz,
-                bar if cfg.adaptive_threshold else None)
+                bar if cfg.adaptive_threshold else None,
+                macro_view=macro_view, learned=learned, signals=state.signals)
             views.append(view)
             if rejection:
                 rejections.append(rejection)
@@ -247,6 +250,9 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
                 profile=prof.name, expiry_hours=prof.expiry_hours,
                 created=now.isoformat(timespec="seconds"), bar_time=cand.bar_time,
                 reasons=list(cand.reasons),
+                regime=cand.regime, strategies=list(cand.strategies),
+                scores=dict(cand.scores), win_probability=cand.win_probability,
+                expected_value=cand.expected_value,
             ))
             state.last_signal_at = now.isoformat(timespec="seconds")
             batch = long_batch if prof.is_long_hold else short_batch
@@ -322,6 +328,23 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"news: unavailable ({news_ctx.error[:80]}) - not used as evidence")
 
+    # --- LEVEL 1: the global tape, refreshed on its own slow clock ----
+    macro_view = macro_feed.MacroView.from_dict(state.macro)
+    if cfg.use_macro and macro_view.age_minutes(now) >= cfg.macro_refresh_minutes:
+        macro_view = macro_feed.build(now)
+        state.macro = macro_view.to_dict()
+        if macro_view.available:
+            print(f"macro: {macro_view.risk} (score {macro_view.risk_score:+.0f}) · "
+                  f"USD {macro_view.usd_bias:+d} · gold {macro_view.gold_bias:+d}")
+        else:
+            print(f"macro: unavailable ({len(macro_view.errors)} ticker error(s)) "
+                  f"- not used as evidence")
+
+    # --- LEVEL 7: what the closed trades have taught, if anything ------
+    learned = memory_bank.learn(state.signals) if cfg.self_learning else {}
+    if learned:
+        print(f"learning: adjusted {len(learned)} weight(s) from closed trades")
+
     session = current_session(now)
     in_kz = in_kill_zone(cfg, now)
 
@@ -334,7 +357,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"news blackout: {news_ctx.blocking_reason} - no scan")
     else:
         rejections, errors, views = scan(
-            state, tg, cfg, now, cache, news_ctx, session, in_kz)
+            state, tg, cfg, now, cache, news_ctx, session, in_kz,
+            macro_view=macro_view, learned=learned)
 
     # --- chart briefing: the running commentary on the market ---------
     gold = set(cfg.gold_symbols)
@@ -367,6 +391,11 @@ def main(argv: list[str] | None = None) -> int:
             symbol, group = item
             # gold leads, then whichever symbol is closest to a signal
             return (symbol not in gold, -max(v.steps_passed for v in group))
+
+        # LEVEL 1 leads the round: the global picture before any chart
+        if cfg.use_macro:
+            tg.send(notifier.format_macro(
+                macro_view, memory_bank.summary(state.signals)))
 
         first = True
         for symbol, group in sorted(by_symbol.items(), key=order):

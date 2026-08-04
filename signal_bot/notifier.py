@@ -138,6 +138,19 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         f"💰 {_esc(_GRADE_ADVICE.get(getattr(cand, 'grade', ''), ''))}",
         f"⏱ ระยะเวลาถือที่คาด: {_esc(cand.hold_time or '-')}",
         "━━━━━━━━━━━━━━",
+        "🏛 <b>บริบทสถาบัน</b>",
+        f"• สภาพตลาด: <b>{_esc(getattr(cand, 'regime', '-') or '-')}</b>"
+        f" (มั่นใจ {getattr(cand, 'regime_confidence', 0):.0f}%)",
+        f"• กลยุทธ์ที่ใช้: {_esc(', '.join(getattr(cand, 'strategies', [])) or '-')}",
+        f"• โอกาสชนะ: <b>{getattr(cand, 'win_probability', 0):.0f}%</b>"
+        f" ({'จากสถิติจริง' if getattr(cand, 'prob_source', '') == 'history' else 'ค่าประเมิน ไม่ใช่สถิติจริง'})",
+        f"• Expected Value: <b>{getattr(cand, 'expected_value', 0):+.2f}R</b>"
+        f" · RR เฉลี่ยที่คาด {getattr(cand, 'expected_rr', 0):.2f}",
+        f"• มหภาค: {_esc(getattr(cand, 'macro_note', '') or '-')}",
+        f"• สถิติสภาพตลาดนี้: {_esc(getattr(cand, 'memory_note', '') or '-')}",
+        f"• ผ่านการอนุมัติ: {_esc(getattr(cand, 'approval', '') or '-')}",
+        f"🚫 <b>จุดยกเลิก:</b> {_esc(getattr(cand, 'invalidation', '') or '-')}",
+        "━━━━━━━━━━━━━━",
         "🧠 <b>เหตุผลในการวิเคราะห์:</b>",
     ]
     lines += [f"• {_esc(r)}" for r in cand.reasons]
@@ -591,6 +604,46 @@ def format_symbol_report(symbol: str, views, counts=None,
     lines += ["━━━━━━━━━━━━━━",
               "<i>วิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุน · "
               "ระบบไม่เปิดออเดอร์เอง · เสี่ยงไม่เกิน 1% ต่อไม้</i>"]
+    return "\n".join(lines)
+
+
+def format_macro(view, memory_line: str = "") -> str:
+    """LEVEL 1 - the global tape and the day's narrative."""
+    lines = ["🌍 <b>ภาพรวมตลาดโลก</b>",
+             f"<i>{datetime.now(timezone.utc).strftime('%d/%m %H:%M')} UTC</i>"]
+
+    if not view.available:
+        lines += ["", "⚠️ <b>ดึงข้อมูลภาพรวมตลาดไม่ได้</b>",
+                  "<i>ระบบจะไม่ใช้ปัจจัยมหภาคประกอบการตัดสินใจรอบนี้ "
+                  "และจะไม่เดาแทน</i>"]
+        for err in view.errors[:4]:
+            lines.append(f"• {_esc(err)}")
+        return "\n".join(lines)
+
+    risk_icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(view.risk, "⚪")
+    lines.append(f"{risk_icon} <b>{_esc(view.risk)}</b> "
+                 f"(คะแนน {view.risk_score:+.0f})")
+
+    lines += ["", "📉 <b>เปลี่ยนแปลงวันนี้</b>"]
+    for name in ("DXY", "US10Y", "VIX", "SP500", "NASDAQ", "DOW",
+                 "OIL", "SILVER", "BTC"):
+        if name in view.changes:
+            ch = view.changes[name]
+            arrow = "▲" if ch > 0 else "▼" if ch < 0 else "↔"
+            lines.append(f"{name:<7} {arrow} {ch:+.2f}%")
+
+    lines += ["", "🧭 <b>Market Narrative</b>"]
+    lines += [f"• {n}" for n in view.narrative]
+
+    lines += ["", "🚧 <b>ข้อมูลที่ระบบเข้าไม่ถึง</b>"]
+    lines += [f"• {_esc(g)}" for g in view.gaps]
+    if view.errors:
+        lines.append(f"• ดึงไม่ได้รอบนี้: {_esc(', '.join(e.split(':')[0] for e in view.errors))}")
+
+    if memory_line:
+        lines += ["", f"📚 <i>{_esc(memory_line)}</i>"]
+    lines += ["━━━━━━━━━━━━━━",
+              "<i>ภาพรวมเพื่อประกอบการวิเคราะห์ ไม่ใช่สัญญาณเข้าเทรด</i>"]
     return "\n".join(lines)
 
 
