@@ -108,14 +108,14 @@ class Settings:
     # never below the floor, and every signal is graded so a relaxed one
     # is visibly a relaxed one.
     daily_signal_target: int = field(
-        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 14))
+        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 7))
     # Gold is the primary instrument and is paced against its own target,
     # so a quiet FX session cannot eat into the gold count and vice versa.
     # Nothing caps it: if gold offers more than this, the extras are sent.
     gold_symbols: list[str] = field(
         default_factory=lambda: _env_list("GOLD_SYMBOLS", "XAUUSD"))
     gold_daily_target: int = field(
-        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 5))
+        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 3))
     # Gold spot comes from Twelve Data, whose free plan allows 800 requests
     # a day. Gold needs 8 series per scan, so scanning it every 5 minutes
     # like the pairs would need ~2,300 - well over the limit. Every 15
@@ -125,8 +125,11 @@ class Settings:
         default_factory=lambda: _env_int("GOLD_SCAN_MINUTES", 15))
     adaptive_threshold: bool = field(
         default_factory=lambda: _env_bool("ADAPTIVE_THRESHOLD", True))
+    # Fourteen instruments looking for seven signals means the bar hardly
+    # has to move, so the floor can afford to sit higher than it did when
+    # eight instruments were chasing fourteen.
     min_score_floor: float = field(
-        default_factory=lambda: _env_float("MIN_SCORE_FLOOR", 66.0))
+        default_factory=lambda: _env_float("MIN_SCORE_FLOOR", 70.0))
     signal_expiry_hours: int = field(default_factory=lambda: _env_int("SIGNAL_EXPIRY_HOURS", 12))
 
     # --- SMC pipeline gates --------------------------------------------
@@ -185,7 +188,7 @@ class Settings:
     # unconfident regime already blends its weights back toward neutral,
     # so gating hard here would penalise it twice.
     min_regime_confidence: float = field(
-        default_factory=lambda: _env_float("MIN_REGIME_CONFIDENCE", 15.0))
+        default_factory=lambda: _env_float("MIN_REGIME_CONFIDENCE", 20.0))
 
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
