@@ -32,6 +32,10 @@ on:
         description: "ส่งรายงานวิเคราะห์กราฟทันที (แนวโน้ม + โซนสำคัญ)"
         type: boolean
         default: false
+      daily:
+        description: "ส่งบทวิเคราะห์ตลาดรายวันทันที (ไม่ต้องรอ 06:00 น.)"
+        type: boolean
+        default: false
 
 # กันไม่ให้รันซ้อนกันจนสถานะสัญญาณเพี้ยน
 concurrency:
@@ -134,6 +138,9 @@ jobs:
           MIN_OB_QUALITY: ${{ vars.MIN_OB_QUALITY }}
           SEND_STATUS_REPORT: ${{ vars.SEND_STATUS_REPORT }}
           BRIEFING_MINUTES: ${{ vars.BRIEFING_MINUTES }}
+          DAILY_REPORT: ${{ vars.DAILY_REPORT }}
+          DAILY_REPORT_HOUR: ${{ vars.DAILY_REPORT_HOUR }}
+          DAILY_SYMBOLS: ${{ vars.DAILY_SYMBOLS }}
           NO_SETUP_NOTICE: ${{ vars.NO_SETUP_NOTICE }}
           USE_NEWS: ${{ vars.USE_NEWS }}
           NEWS_PRE_MIN: ${{ vars.NEWS_PRE_MIN }}
@@ -143,11 +150,13 @@ jobs:
           RUN_STATUS: ${{ inputs.status }}
           RUN_IGNORE_HOURS: ${{ inputs.ignore_hours }}
           RUN_BRIEF: ${{ inputs.brief }}
+          RUN_DAILY: ${{ inputs.daily }}
         run: |
           args=""
           [ "$RUN_STATUS" = "true" ] && args="$args --status"
           [ "$RUN_IGNORE_HOURS" = "true" ] && args="$args --ignore-hours"
           [ "$RUN_BRIEF" = "true" ] && args="$args --brief"
+          [ "$RUN_DAILY" = "true" ] && args="$args --daily"
           echo "รันคำสั่ง: python -m signal_bot.main $args"
           python -m signal_bot.main $args
 

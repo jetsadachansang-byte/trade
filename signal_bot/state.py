@@ -77,6 +77,9 @@ class State:
     last_briefing_at: str = ""         # ISO-8601 UTC of the last chart briefing
     last_gold_scan_at: str = ""        # gold runs on its own slower clock
     macro: dict = field(default_factory=dict)   # LEVEL 1 snapshot, refreshed hourly
+    # Bangkok date of the last daily analysis, so the 06:00 report goes
+    # out once a morning however many times the scan runs.
+    last_daily_date: str = ""
 
     # --- persistence -------------------------------------------------
     @classmethod
@@ -91,7 +94,8 @@ class State:
         return cls(signals=signals, last_signal_at=raw.get("last_signal_at", ""),
                    last_briefing_at=raw.get("last_briefing_at", ""),
                    last_gold_scan_at=raw.get("last_gold_scan_at", ""),
-                   macro=raw.get("macro", {}))
+                   macro=raw.get("macro", {}),
+                   last_daily_date=raw.get("last_daily_date", ""))
 
     def save(self, path: Path = STATE_FILE) -> None:
         # keep the file small: drop finished signals older than 30 days
@@ -104,6 +108,7 @@ class State:
             "last_briefing_at": self.last_briefing_at,
             "last_gold_scan_at": self.last_gold_scan_at,
             "macro": self.macro,
+            "last_daily_date": self.last_daily_date,
             "signals": [asdict(s) for s in keep],
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
