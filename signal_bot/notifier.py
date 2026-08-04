@@ -417,50 +417,99 @@ def _levels(v, symbol: str) -> list:
     return out
 
 
-def _scenarios(v, symbol: str, direction: int) -> list:
-    """If price goes here, do this - written for the bias the structure gives.
+def _candle_rules(entry_tf: str, bullish: bool) -> list:
+    """The candle that has to close before a zone counts as confirmed."""
+    if bullish:
+        return [f"　• แท่งเขียวกลืนแท่งแดงก่อนหน้า (Bullish Engulfing)",
+                f"　• หรือไส้ล่างยาว ปิดกลับเข้าโซน (Pin Bar / ค้อน)",
+                f"　• หรือปิดสูงกว่ายอดแท่งก่อนหน้า"]
+    return [f"　• แท่งแดงกลืนแท่งเขียวก่อนหน้า (Bearish Engulfing)",
+            f"　• หรือไส้บนยาว ปิดกลับเข้าโซน (Pin Bar / ดาวตก)",
+            f"　• หรือปิดต่ำกว่าก้นแท่งก่อนหน้า"]
 
-    These are conditional plans, not instructions to trade: the system
-    analyses and reports, it never places an order.
+
+def _playbook(v, symbol: str, direction: int) -> list:
+    """Zone by zone: may I buy, may I sell, and what must the candle do.
+
+    Written as explicit permissions rather than commentary, because
+    "price is at resistance" does not tell anyone whether to press a
+    button. Nothing here places an order - the decision stays with the
+    person reading it.
     """
+    tf = v.tf_names[3]
     hi = _fmt(v.swing_high, symbol) if v.swing_high else None
     lo = _fmt(v.swing_low, symbol) if v.swing_low else None
-    ob = (f"{_fmt(v.ob_zone[0], symbol)} – {_fmt(v.ob_zone[1], symbol)}"
-          if v.ob_zone else None)
+    ob_lo = _fmt(v.ob_zone[0], symbol) if v.ob_zone else None
+    ob_hi = _fmt(v.ob_zone[1], symbol) if v.ob_zone else None
     out = []
 
     if direction > 0:
-        if ob:
-            out.append(f"▼ <b>ย่อลงมาที่ {ob}</b> (โซน OB)\n"
-                       f"　 → โซนที่ระบบรอเข้า <b>BUY</b> "
-                       f"รอแท่ง {v.tf_names[3]} ปิดยืนยันก่อน อย่าเข้าสวนขณะกำลังลง")
+        if ob_lo:
+            out += [f"🟢 <b>ถ้าลงมาที่ {ob_lo} – {ob_hi}</b> (โซน Order Block)",
+                    "✅ <b>BUY ได้</b> — เป็นโซนที่ระบบรออยู่",
+                    "❌ ห้าม SELL ที่โซนนี้ (สวนโครงสร้าง)",
+                    f"📍 ต้องรอแท่ง {tf} <b>ปิด</b> แบบใดแบบหนึ่งก่อน:"]
+            out += _candle_rules(tf, True)
+            out.append("❌ ห้ามเข้าตอนแท่งยังไม่ปิด / ห้ามเข้าตอนราคากำลังดิ่งลง")
+            if lo:
+                out.append(f"🛑 ถ้าเข้าแล้ว วาง SL ใต้ <b>{lo}</b>")
+            out.append("")
         if hi:
-            out.append(f"▲ <b>ขึ้นถึง {hi}</b> (แนวต้าน)\n"
-                       f"　 → ชนกองสภาพคล่องฝั่งบน ถ้ายังไม่เข้าไม้ <b>อย่าไล่ราคา</b> "
-                       f"รอเบรกแล้วย่อกลับมาทดสอบค่อยพิจารณา")
+            out += [f"🔴 <b>ถ้าขึ้นไปที่ {hi}</b> (แนวต้าน / สภาพคล่องฝั่งบน)",
+                    "❌ <b>BUY ไม่ได้</b> — ไล่ราคา เหลือระยะวิ่งน้อย",
+                    "❌ <b>SELL ไม่ได้</b> — สวนโครงสร้างขาขึ้น",
+                    "👉 <b>รออย่างเดียว</b>",
+                    f"　⬆️ ถ้าทะลุขึ้น ({tf} ปิดเหนือ {hi})",
+                    f"　　→ ขาขึ้นไปต่อ <b>อย่าไล่ซื้อ</b> รอย่อกลับมาทดสอบ {hi}",
+                    "　　→ เห็นแท่งเขียวเด้งจากแนวนี้ค่อย BUY",
+                    f"　⬇️ ถ้าเด้งลง (ไส้บนยาว ปิดต่ำกว่า {hi})",
+                    f"　　→ กลับไปรอที่โซน Order Block ข้างล่าง", ""]
         if lo:
-            out.append(f"⛔ <b>ปิดต่ำกว่า {lo}</b>\n"
-                       f"　 → โครงสร้างขาขึ้นเสีย <b>ยกเลิกแผนซื้อทั้งหมด</b> "
-                       f"รอโครงสร้างใหม่ก่อน")
+            out += [f"⛔ <b>ถ้า {tf} ปิดต่ำกว่า {lo}</b>",
+                    "→ <b>แผน BUY ยกเลิกทั้งหมด</b> ห้ามถัว ห้ามเพิ่มไม้",
+                    "→ อยาก SELL ต้องรอ CHoCH ขาลงยืนยันก่อน ไม่ใช่เข้าทันที"]
+
     elif direction < 0:
-        if ob:
-            out.append(f"▲ <b>เด้งขึ้นมาที่ {ob}</b> (โซน OB)\n"
-                       f"　 → โซนที่ระบบรอเข้า <b>SELL</b> "
-                       f"รอแท่ง {v.tf_names[3]} ปิดยืนยันก่อน อย่าเข้าสวนขณะกำลังขึ้น")
+        if ob_lo:
+            out += [f"🔴 <b>ถ้าเด้งขึ้นมาที่ {ob_lo} – {ob_hi}</b> (โซน Order Block)",
+                    "✅ <b>SELL ได้</b> — เป็นโซนที่ระบบรออยู่",
+                    "❌ ห้าม BUY ที่โซนนี้ (สวนโครงสร้าง)",
+                    f"📍 ต้องรอแท่ง {tf} <b>ปิด</b> แบบใดแบบหนึ่งก่อน:"]
+            out += _candle_rules(tf, False)
+            out.append("❌ ห้ามเข้าตอนแท่งยังไม่ปิด / ห้ามเข้าตอนราคากำลังพุ่งขึ้น")
+            if hi:
+                out.append(f"🛑 ถ้าเข้าแล้ว วาง SL เหนือ <b>{hi}</b>")
+            out.append("")
         if lo:
-            out.append(f"▼ <b>ลงถึง {lo}</b> (แนวรับ)\n"
-                       f"　 → ชนกองสภาพคล่องฝั่งล่าง ถ้ายังไม่เข้าไม้ <b>อย่าไล่ราคา</b> "
-                       f"รอเบรกแล้วเด้งกลับมาทดสอบค่อยพิจารณา")
+            out += [f"🟢 <b>ถ้าลงไปที่ {lo}</b> (แนวรับ / สภาพคล่องฝั่งล่าง)",
+                    "❌ <b>SELL ไม่ได้</b> — ไล่ราคา เหลือระยะวิ่งน้อย",
+                    "❌ <b>BUY ไม่ได้</b> — สวนโครงสร้างขาลง",
+                    "👉 <b>รออย่างเดียว</b>",
+                    f"　⬇️ ถ้าทะลุลง ({tf} ปิดต่ำกว่า {lo})",
+                    f"　　→ ขาลงไปต่อ <b>อย่าไล่ขาย</b> รอเด้งกลับมาทดสอบ {lo}",
+                    "　　→ เห็นแท่งแดงกดจากแนวนี้ค่อย SELL",
+                    f"　⬆️ ถ้าเด้งขึ้น (ไส้ล่างยาว ปิดสูงกว่า {lo})",
+                    f"　　→ กลับไปรอที่โซน Order Block ข้างบน", ""]
         if hi:
-            out.append(f"⛔ <b>ปิดสูงกว่า {hi}</b>\n"
-                       f"　 → โครงสร้างขาลงเสีย <b>ยกเลิกแผนขายทั้งหมด</b> "
-                       f"รอโครงสร้างใหม่ก่อน")
+            out += [f"⛔ <b>ถ้า {tf} ปิดสูงกว่า {hi}</b>",
+                    "→ <b>แผน SELL ยกเลิกทั้งหมด</b> ห้ามถัว ห้ามเพิ่มไม้",
+                    "→ อยาก BUY ต้องรอ CHoCH ขาขึ้นยืนยันก่อน ไม่ใช่เข้าทันที"]
+
     else:
         if hi and lo:
-            out.append(f"↔ ตอนนี้แกว่งในกรอบ <b>{lo} – {hi}</b> — ยังไม่มีฝั่งได้เปรียบ")
-            out.append(f"▲ <b>ปิดเหนือ {hi}</b> → เอียงไปทางขาขึ้น เริ่มมองหาจังหวะ BUY")
-            out.append(f"▼ <b>ปิดต่ำกว่า {lo}</b> → เอียงไปทางขาลง เริ่มมองหาจังหวะ SELL")
-        out.append("⏳ ระหว่างนี้ <b>ยังไม่ควรเข้าไม้</b> — เข้าในกรอบคือการเดา")
+            out += [f"⚪ <b>ตอนนี้ราคาแกว่งในกรอบ {lo} – {hi}</b>",
+                    "❌ <b>ห้าม BUY</b> ❌ <b>ห้าม SELL</b>",
+                    "　เพราะไทม์เฟรมใหญ่ยังขัดกัน เข้าตอนนี้คือการเดา",
+                    "👉 <b>รอให้ราคาปิดออกนอกกรอบก่อน</b>", "",
+                    f"　⬆️ ถ้า {tf} ปิดเหนือ {hi}",
+                    f"　　→ เอียงขาขึ้น รอย่อกลับมาทดสอบ {hi} แล้วค่อยหาจังหวะ BUY",
+                    "　　→ ต้องเห็นแท่งเขียวเด้งจากแนวนี้ ไม่ใช่ไล่ซื้อทันที",
+                    f"　⬇️ ถ้า {tf} ปิดต่ำกว่า {lo}",
+                    f"　　→ เอียงขาลง รอเด้งกลับมาทดสอบ {lo} แล้วค่อยหาจังหวะ SELL",
+                    "　　→ ต้องเห็นแท่งแดงกดจากแนวนี้ ไม่ใช่ไล่ขายทันที"]
+        else:
+            out += ["⚪ ยังไม่มีแนวรับ/แนวต้านที่ชัดพอจะวางแผน",
+                    "❌ <b>ห้าม BUY</b> ❌ <b>ห้าม SELL</b> — รอโครงสร้างก่อน"]
     return out
 
 
@@ -524,8 +573,8 @@ def format_symbol_report(symbol: str, views, counts=None,
         lines += ["", "📍 <b>ระดับราคาสำคัญ</b>"] + levels
 
     # --- conditional plan ---------------------------------------------
-    lines += ["", "🗺️ <b>ถ้าราคาไปถึงตรงนี้ ควรทำอะไร</b>"]
-    lines += _scenarios(best, symbol, direction)
+    lines += ["", "🗺️ <b>แผนชัด ๆ — โซนไหนทำอะไรได้</b>"]
+    lines += _playbook(best, symbol, direction)
 
     # --- verdict -------------------------------------------------------
     label, reason = _verdict(best, direction)
