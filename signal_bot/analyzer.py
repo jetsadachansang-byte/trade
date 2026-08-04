@@ -17,10 +17,12 @@ import pandas as pd
 
 from . import exits as EXITS
 from . import macro as MACRO
+from . import memory as MEM
 from . import probability as PROB
 from . import regime as REG
 from . import smc as S
 from . import strategy as STRAT
+from . import voters as VOTE
 from .config import Settings
 from .data import freshness
 from .profiles import Profile
@@ -64,6 +66,8 @@ class Candidate:
     memory_note: str = ""
     approval: str = ""
     invalidation: str = ""
+    # --- Adaptive Multi-Strategy: who voted, and what they said -------
+    consensus: object = None          # voters.Consensus, when voting is on
     # --- Dynamic Exit Engine -----------------------------------------
     exit_mode: str = "fixed"
     exit_label: str = ""
@@ -138,6 +142,7 @@ class MarketView:
     regime_confidence: float = 0.0
     regime_evidence: list = field(default_factory=list)
     strategies: list = field(default_factory=list)
+    consensus: object = None          # voters.Consensus, when voting is on
 
 
 def _clamp(value: float) -> float:
@@ -421,7 +426,17 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     reg = REG.detect(entry_df, st_entry, sm, atr_value, news_active)
     view.regime, view.regime_confidence = reg.name, reg.confidence
     view.regime_evidence = list(reg.evidence)
-    view.strategies = list(STRAT.select(reg, learned)[0])
+
+    # --- LEVEL 4/5: the market picks the strategies and their weights ---
+    strategies, weights, strategy_why = STRAT.select(reg, learned)
+    view.strategies = list(strategies)
+    # LEVEL 1: what the global tape implies for this instrument
+    if macro_view is not None:
+        macro_dir, macro_why = MACRO.bias_for(macro_view, symbol)
+    else:
+        macro_dir, macro_why = 0, "ยังไม่มีข้อมูลภาพรวมมหภาคในรอบนี้"
+    # LEVEL 3: what this regime has actually paid in the past
+    recall = MEM.recall(signals or [], reg.name)
     view.steps_passed = 2
 
     if cfg.require_liquidity_target and not (sm.bsl_above if is_buy else sm.ssl_below):
@@ -521,9 +536,38 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         "rr": _score_rr(planned_rr),
         "spread": _score_spread(session, vol_state),
         "news": news_score,
+        "macro": 75.0 if macro_dir == direction else 30.0 if macro_dir else 50.0,
     }
-    weights = cfg.weights
-    total = sum(parts[k] * weights.get(k, 0.0) for k in parts) / sum(weights.values())
+    # Only weigh the categories that were actually scored, so a playbook
+    # naming a category this pass could not compute cannot quietly dilute
+    # the result by inflating the denominator.
+    used_w = {k: weights.get(k, 0.0) for k in parts}
+    total = (sum(parts[k] * used_w[k] for k in parts) / sum(used_w.values())
+             if sum(used_w.values()) > 0 else 50.0)
+
+    # --- Adaptive Multi-Strategy: let each technique vote --------------
+    consensus = None
+    if cfg.strategy_voting:
+        vote_ctx = {
+            "st_entry": st_entry, "st_d1": st_d1, "st_h4": st_h4,
+            "sm": sm, "df": entry_df, "reg": reg,
+            "strength": REG._directional_strength(entry_df),
+            "symbol": symbol, "session": session, "in_kill_zone": in_kill_zone,
+            "macro_dir": macro_dir, "macro_why": macro_why,
+            "news_ctx": news_ctx,
+        }
+        consensus = VOTE.decide(direction, vote_ctx)
+        view.consensus = consensus
+        # A score the called techniques agree on is worth more than the
+        # same score they are split over, so the consensus moves the
+        # number rather than replacing it.
+        total = _clamp(total + (consensus.confidence - 50.0) * cfg.vote_influence)
+        parts["consensus"] = consensus.confidence
+        if cfg.vote_conflict_blocks and consensus.verdict == "WAIT" \
+                and len(consensus.dissenters) >= 2:
+            return reject("10-consensus",
+                          "เทคนิคขัดแย้งกัน — "
+                          + ", ".join(consensus.dissenters) + " ไม่สนับสนุนทิศทางนี้")
 
     view.score = round(total, 1)
     base = cfg.number("SCORE_THRESHOLD", prof.score_threshold)
@@ -576,7 +620,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         regime=reg.name, regime_confidence=reg.confidence,
         strategies=list(strategies), weights=dict(weights),
         strategy_why=strategy_why, macro_note=macro_why,
-        memory_note=recall.note,
+        memory_note=recall.note, consensus=consensus,
     )
 
     # --- LEVEL 6: the numbers come from the chosen exit plan ------------
@@ -611,6 +655,10 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
             f"{prof.htf_minor}:{st_h1.trend}")
     cand.reasons.append(f"สภาพตลาด: {reg.name} (มั่นใจ {reg.confidence:.0f}%)")
     cand.reasons.append(f"กลยุทธ์ที่เลือกใช้: {', '.join(strategies)}")
+    if consensus is not None:
+        cand.reasons.append(
+            f"มติเทคนิค: สนับสนุน {len(consensus.supporters)}/{len(consensus.votes)} "
+            f"· สอดคล้อง {consensus.agreement:.0%} · ความมั่นใจ {consensus.confidence:.0f}")
     cand.reasons.append(f"Market Structure: {bias}")
     if st_entry.recent_bos:
         cand.reasons.append("BOS ✔")
@@ -656,6 +704,14 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     elif news_ctx is not None and news_ctx.upcoming:
         soon = news_ctx.upcoming[0]
         cand.risks.append(f"มีข่าวแรงใกล้เข้ามา: {soon.title} ({soon.currency})")
+    if consensus is not None and consensus.dissenters:
+        cand.risks.append(
+            "เทคนิคที่ไม่สนับสนุนแผนนี้: " + ", ".join(consensus.dissenters)
+            + " — ถ้าราคาไม่ไปตามแผนเร็ว ให้ถอยก่อน")
+    if consensus is not None and consensus.agreement < 0.55:
+        cand.risks.append(
+            f"เทคนิคเห็นตรงกันแค่ {consensus.agreement:.0%} — "
+            f"ลดขนาดไม้ลงจากปกติ")
     if view.data_stale:
         cand.risks.append(f"ข้อมูลราคาช้า {view.data_age_min:.0f} นาที ตรวจราคาจริงก่อนเข้า")
     if view.price_note:
