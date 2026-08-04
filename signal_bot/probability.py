@@ -89,7 +89,7 @@ def assess(score: float, threshold: float, tp_r: tuple,
 
 
 def approve(odds: Odds, reg, steps_passed: int, total_steps: int,
-            news_blocking: bool) -> tuple:
+            news_blocking: bool, min_regime_confidence: float = 15.0) -> tuple:
     """LEVEL 10 - would a portfolio manager sign this off?
 
     Returns (approved, reason). A rejection here is a good outcome: the
@@ -104,7 +104,7 @@ def approve(odds: Odds, reg, steps_passed: int, total_steps: int,
                        f"เข้าไปก็ขาดทุนในระยะยาว")
     if odds.win_probability < 35:
         return False, f"โอกาสชนะ {odds.win_probability:.0f}% ต่ำเกินรับได้"
-    if reg is not None and reg.confidence < 25:
+    if reg is not None and reg.confidence < min_regime_confidence:
         return False, (f"ระบุสภาพตลาดได้ไม่ชัด (มั่นใจ {reg.confidence:.0f}%) — "
                        f"ไม่รู้ว่ากำลังเทรดอะไรอยู่")
     return True, (f"EV {odds.expected_value:+.2f}R · "
