@@ -705,3 +705,203 @@ def format_no_setup(news_ctx, views) -> str:
 
 
 _SENTIMENT_TH = {"bullish": "แข็ง", "bearish": "อ่อน", "neutral": "กลาง"}
+
+
+# ----------------------------------------------------------------------
+# Daily Market Analysis - one planning report, sent once each morning.
+# ----------------------------------------------------------------------
+_BIAS_ICON = {"BUY": "🟢", "SELL": "🔴", "WAIT": "⚪"}
+_RISK_ICON = {"LOW": "🟢", "MEDIUM": "🟡", "HIGH": "🔴"}
+
+
+def _score_bar(score: float) -> str:
+    """A ten-cell bar so a number can be read at a glance."""
+    filled = int(round(max(0.0, min(100.0, score)) / 10))
+    return "█" * filled + "░" * (10 - filled)
+
+
+def _plan_block(plan, symbol: str, title: str) -> list:
+    """One prepared plan, or the reason it is not on the table."""
+    if plan.side == "WAIT":
+        lines = [f"<b>{title}</b>", "⏸ รอ — ยังไม่เข้าเงื่อนไข"]
+        if plan.waiting_for:
+            lines.append("ต้องเห็นสิ่งเหล่านี้ก่อน:")
+            lines += [f"　• {_esc(w)}" for w in plan.waiting_for]
+        return lines
+
+    head = "🟢" if plan.side == "BUY" else "🔴"
+    ok = "✅ พร้อมใช้" if plan.viable else "⚠️ ยังไม่ครบเงื่อนไข — เตรียมไว้ก่อน"
+    lines = [f"<b>{title}</b>  {head} {plan.side}  {ok}",
+             f"เข้า: <b>{plan.entry_low} – {plan.entry_high}</b>",
+             f"🛑 SL: <b>{plan.sl}</b>",
+             f"🎯 TP1 {plan.tp[0]} · TP2 {plan.tp[1]} · TP3 {plan.tp[2]}",
+             f"RR 1:{plan.rr:.1f} · โอกาสถึง TP1 {plan.win_probability:.0f}% · "
+             f"EV {plan.expected_value:+.2f}R",
+             f"⏱ ถือประมาณ {_esc(plan.hold_time)} · คะแนน {plan.confidence:.0f}/100"]
+    if plan.exit_mode == "trailing":
+        lines.append("🔒 แผนออก: ปิดบางส่วนแล้วลาก SL ตาม")
+    if plan.why:
+        lines.append("เหตุผล:")
+        lines += [f"　• {_esc(w)}" for w in plan.why[:5]]
+    if not plan.viable and plan.waiting_for:
+        lines.append("ยังขาด:")
+        lines += [f"　• {_esc(w)}" for w in plan.waiting_for[:3]]
+    return lines
+
+
+def format_daily_overview(macro_view, reports, risk, memory_line: str = "") -> str:
+    """Part one: what the world is pricing this morning."""
+    from .daily import BANGKOK
+    stamp = datetime.now(timezone.utc).astimezone(BANGKOK).strftime("%d/%m/%Y")
+    lines = [f"📅 <b>บทวิเคราะห์ตลาดประจำวัน</b>",
+             f"<i>{stamp} · 06:00 น. (เวลาไทย)</i>",
+             "<i>รายงานเพื่อวางแผน ไม่ใช่สัญญาณเข้าออเดอร์ — "
+             "สัญญาณจะส่งแยกเมื่อเงื่อนไขครบ</i>", ""]
+
+    # --- the tape ------------------------------------------------------
+    if macro_view is not None and macro_view.available:
+        icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(macro_view.risk, "⚪")
+        lines += [f"🌍 <b>ภาพรวมตลาดโลก</b>",
+                  f"{icon} <b>{_esc(macro_view.risk)}</b> "
+                  f"(คะแนน {macro_view.risk_score:+.0f})"]
+        row = []
+        for name in ("DXY", "US10Y", "VIX", "SP500", "NASDAQ", "DOW",
+                     "OIL", "SILVER", "BTC"):
+            if name in macro_view.changes:
+                ch = macro_view.changes[name]
+                row.append(f"{name} {'▲' if ch > 0 else '▼' if ch < 0 else '↔'}{ch:+.2f}%")
+        lines += [" · ".join(row[:5]), " · ".join(row[5:])]
+        lines += ["", "🧭 <b>Market Narrative</b>"]
+        lines += [f"• {n}" for n in macro_view.narrative]
+    else:
+        lines += ["🌍 <b>ภาพรวมตลาดโลก</b>",
+                  "⚠️ <b>ไม่สามารถยืนยันข้อมูลล่าสุดได้</b>",
+                  "<i>ระบบจะไม่ใช้ปัจจัยมหภาคประกอบการวิเคราะห์วันนี้ และไม่เดาแทน</i>"]
+
+    # --- what cannot be checked ---------------------------------------
+    if macro_view is not None and macro_view.gaps:
+        lines += ["", "🚧 <b>ข้อมูลที่ระบบเข้าไม่ถึง</b>"]
+        lines += [f"• {_esc(g)}" for g in macro_view.gaps]
+
+    label, why = risk
+    lines += ["", f"⚠️ <b>ระดับความเสี่ยงของตลาดวันนี้: "
+                  f"{_RISK_ICON.get(label, '')} {label}</b>",
+              f"<i>{_esc(why)}</i>"]
+
+    # --- the one-line table -------------------------------------------
+    lines += ["", "📊 <b>สรุปทุกคู่</b>"]
+    for r in reports:
+        if r.error:
+            lines.append(f"{_esc(r.symbol)}: ⚠️ {_esc(r.error)}")
+            continue
+        lines.append(f"{_BIAS_ICON.get(r.bias, '')} <b>{_esc(r.symbol)}</b> "
+                     f"{r.bias} · BUY {r.buy_score:.0f} / SELL {r.sell_score:.0f} "
+                     f"· {_esc(r.regime)}")
+    if memory_line:
+        lines += ["", f"📚 <i>{_esc(memory_line)}</i>"]
+    return "\n".join(lines)
+
+
+def format_daily_symbol(rep) -> str:
+    """One instrument: structure, zones, and the three plans."""
+    if rep.error:
+        return (f"📊 <b>{_esc(rep.symbol)}</b>\n"
+                f"⚠️ <i>{_esc(rep.error)} — ไม่วิเคราะห์คู่นี้วันนี้</i>")
+
+    icon = _BIAS_ICON.get(rep.bias, "")
+    lines = [f"{icon} <b>{_esc(rep.symbol)}</b> · <b>{_fmt(rep.price, rep.symbol)}</b>",
+             f"<b>Bias วันนี้: {rep.bias}</b>", ""]
+
+    # --- scores --------------------------------------------------------
+    lines += ["<b>คะแนนสองฝั่ง</b>",
+              f"🟢 BUY  {_score_bar(rep.buy_score)} {rep.buy_score:.0f}/100",
+              f"🔴 SELL {_score_bar(rep.sell_score)} {rep.sell_score:.0f}/100", ""]
+
+    # --- regime and timeframes -----------------------------------------
+    lines += [f"<b>สภาพตลาด:</b> {_esc(rep.regime)} "
+              f"(มั่นใจ {rep.regime_confidence:.0f}%) · ผันผวน {rep.volatility}",
+              f"<b>กลยุทธ์ที่เหมาะ:</b> {_esc(', '.join(rep.strategies))}", ""]
+
+    tf_row = " ".join(
+        f"{tf}{_ARROW.get(rep.trends.get(tf, ''), '·')}"
+        for tf in ("W1", "D1", "H4", "H1", "M15", "M5"))
+    lines += ["<b>แนวโน้มแต่ละไทม์เฟรม</b>", tf_row,
+              f"<i>{_esc(rep.htf_support)}</i>", ""]
+
+    # --- zones ---------------------------------------------------------
+    lines.append("<b>📍 โซนราคาสำคัญ</b>")
+    if rep.strong_buy:
+        lines.append(f"🟢 Strong Buy Zone: <b>{rep.strong_buy[0]} – {rep.strong_buy[1]}</b> (Order Block)")
+    if rep.weak_buy:
+        lines.append(f"🟩 Weak Buy Zone: {rep.weak_buy[0]} – {rep.weak_buy[1]} (แนวรับ)")
+    if rep.weak_sell:
+        lines.append(f"🟥 Weak Sell Zone: {rep.weak_sell[0]} – {rep.weak_sell[1]} (แนวต้าน)")
+    if rep.strong_sell:
+        lines.append(f"🔴 Strong Sell Zone: <b>{rep.strong_sell[0]} – {rep.strong_sell[1]}</b> (Order Block)")
+    lines += [f"🔺 Swing High: {_fmt(rep.swing_high, rep.symbol)}" if rep.swing_high else "",
+              f"🔻 Swing Low: {_fmt(rep.swing_low, rep.symbol)}" if rep.swing_low else "",
+              f"💧 สภาพคล่อง: {_esc(rep.liquidity_note)}",
+              f"⚡ FVG: {_esc(rep.fvg_note)}",
+              f"📏 ATR (H1): {_fmt(rep.atr, rep.symbol)} · "
+              f"ตำแหน่งในกรอบ {rep.range_pos:.2f}", ""]
+
+    # --- the three plans ----------------------------------------------
+    lines += _plan_block(rep.plan_buy, rep.symbol, "PLAN A — BUY") + [""]
+    lines += _plan_block(rep.plan_sell, rep.symbol, "PLAN B — SELL") + [""]
+    if rep.plan_wait.side == "WAIT" and rep.plan_wait.waiting_for:
+        lines += _plan_block(rep.plan_wait, rep.symbol, "PLAN C — WAIT") + [""]
+
+    # --- right now ------------------------------------------------------
+    lines += ["<b>💡 ถ้าเข้าตอนนี้เลย</b>",
+              f"{_BIAS_ICON.get(rep.now_verdict, '')} <b>{rep.now_verdict}</b>",
+              f"<i>{_esc(rep.now_why)}</i>", ""]
+
+    # --- managing it ----------------------------------------------------
+    lines += ["<b>🎛 การจัดการไม้</b>",
+              "• ถึง TP1 → ปิด 1/3 แล้วเลื่อน SL มาที่จุดเข้า (Break Even)",
+              "• ถึง TP2 → ปิดอีก 1/3 ล็อกกำไรไว้",
+              "• ถึง TP3 → ปิดที่เหลือ หรือถ้าเทรนด์ยังแรงให้ลาก SL ตามแทน",
+              "━━━━━━━━━━━━━━",
+              "<i>▲ ขาขึ้น · ▼ ขาลง · ↔ ออกข้าง · ทุกระดับราคาอ้างอิงโครงสร้างจริง</i>"]
+    return "\n".join(l for l in lines if l != "" or True)
+
+
+def format_daily_watchlist(reports, risk) -> str:
+    """The closing summary: what to watch, what to avoid, and when."""
+    ok = [r for r in reports if not r.error]
+    buys = sorted(ok, key=lambda r: -r.buy_score)[:3]
+    sells = sorted(ok, key=lambda r: -r.sell_score)[:3]
+    avoid = [r for r in ok if r.bias == "WAIT" and
+             abs(r.buy_score - r.sell_score) <= 3][:4]
+
+    lines = ["📋 <b>Daily Watchlist</b>", ""]
+    lines.append("🟢 <b>Top 3 ฝั่ง BUY</b>")
+    lines += [f"{i}. {_esc(r.symbol)} — {r.buy_score:.0f}/100 · {_esc(r.regime)}"
+              for i, r in enumerate(buys, 1)] or ["—"]
+    lines += ["", "🔴 <b>Top 3 ฝั่ง SELL</b>"]
+    lines += [f"{i}. {_esc(r.symbol)} — {r.sell_score:.0f}/100 · {_esc(r.regime)}"
+              for i, r in enumerate(sells, 1)] or ["—"]
+
+    lines += ["", "⛔ <b>คู่ที่ควรหลีกเลี่ยงวันนี้</b>"]
+    if avoid:
+        lines += [f"• {_esc(r.symbol)} — สองฝั่งคะแนนใกล้กันมาก "
+                  f"({r.buy_score:.0f}/{r.sell_score:.0f}) เข้าไปคือการเดา"
+                  for r in avoid]
+    else:
+        lines.append("• ไม่มีคู่ที่สับสนจนควรเลี่ยงทั้งหมด")
+
+    lines += ["", "⏰ <b>ช่วงเวลาที่ควรเทรด</b>",
+              "• 14:00 – 18:00 น. — ลอนดอนเปิด สภาพคล่องเริ่มมา",
+              "• 19:00 – 23:00 น. — ลอนดอนทับนิวยอร์ก ช่วงที่ราคาเดินดีที่สุด",
+              "", "🚫 <b>ช่วงที่ไม่ควรเทรด</b>",
+              "• 05:00 – 13:00 น. — ช่วงเอเชีย สภาพคล่องบาง ราคามักแกว่งในกรอบ",
+              "• ก่อน–หลังข่าวแรง 30 นาที — สเปรดกว้างและราคากระชาก"]
+
+    label, why = risk
+    lines += ["", f"⚠️ <b>ความเสี่ยงตลาดวันนี้: "
+                  f"{_RISK_ICON.get(label, '')} {label}</b>",
+              f"<i>{_esc(why)}</i>",
+              "━━━━━━━━━━━━━━",
+              "<i>บทวิเคราะห์เพื่อวางแผน ไม่ใช่คำแนะนำการลงทุน · "
+              "ระบบไม่เปิดออเดอร์เอง · เสี่ยงไม่เกิน 1% ต่อไม้</i>"]
+    return "\n".join(lines)

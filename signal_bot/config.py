@@ -192,9 +192,18 @@ class Settings:
 
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
-    # รายงานวิเคราะห์กราฟทุกกี่นาที (0 = ปิด). ส่งแยกข้อความละ 1 คู่เทรด
-    # จึงได้ ~8 ข้อความต่อรอบ — ทุกชั่วโมงคือ ~192 ข้อความ/วัน
-    briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 60))
+    # รายงานวิเคราะห์กราฟรายชั่วโมง — ปิดไว้ เพราะบทวิเคราะห์รายวันตอน
+    # 06:00 น. ทำหน้าที่นี้แทนแล้ว ตั้งเป็นนาทีถ้าอยากได้ระหว่างวันด้วย
+    briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 0))
+
+    # --- บทวิเคราะห์ตลาดรายวัน (Daily Market Analysis) ------------------
+    daily_report: bool = field(default_factory=lambda: _env_bool("DAILY_REPORT", True))
+    # ชั่วโมงตามเวลาไทย (Asia/Bangkok) ที่จะส่งบทวิเคราะห์
+    daily_report_hour: int = field(
+        default_factory=lambda: _env_int("DAILY_REPORT_HOUR", 6))
+    daily_symbols: list[str] = field(default_factory=lambda: _env_list(
+        "DAILY_SYMBOLS",
+        "XAUUSD,EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))
     # แจ้ง "ยังไม่มีจุดเข้า" ทุกกี่นาที (0 = ปิด) - ต่อท้ายรายงานภาพรวม
     no_setup_notice: bool = field(default_factory=lambda: _env_bool("NO_SETUP_NOTICE", True))
 

@@ -16,6 +16,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
+from . import daily as daily_report
 from . import data as market_data
 from . import macro as macro_feed
 from . import memory as memory_bank
@@ -304,6 +305,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="always send the status report this run")
     parser.add_argument("--brief", action="store_true",
                         help="always send the chart briefing this run")
+    parser.add_argument("--daily", action="store_true",
+                        help="send the daily market analysis now, ignoring the clock")
     parser.add_argument("--ignore-hours", action="store_true",
                         help="skip market-hours and kill-zone checks (for testing)")
     args = parser.parse_args(argv)
@@ -375,6 +378,34 @@ def main(argv: list[str] | None = None) -> int:
         rejections, errors, views = scan(
             state, tg, cfg, now, cache, news_ctx, session, in_kz,
             macro_view=macro_view, learned=learned)
+
+    # --- Daily Market Analysis: one planning report each morning ------
+    if cfg.daily_report and (args.daily
+                             or daily_report.due(state, now, cfg.daily_report_hour)):
+        reports = []
+        for symbol in cfg.daily_symbols:
+            try:
+                frames = cache.frames(symbol, list(daily_report.LADDER))
+            except market_data.DataError as exc:
+                rep = daily_report.SymbolReport(symbol=symbol, error=str(exc)[:110])
+                reports.append(rep)
+                continue
+            reports.append(daily_report.analyse_symbol(
+                symbol, frames, cfg,
+                bool(news_ctx is not None and getattr(news_ctx, "upcoming", None)),
+                macro_view, news_ctx, session))
+
+        risk = daily_report.risk_level([r for r in reports if not r.error], macro_view)
+        tg.send(notifier.format_daily_overview(
+            macro_view, reports, risk, memory_bank.summary(state.signals)))
+        for rep in reports:
+            tg.send(notifier.format_daily_symbol(rep))
+        tg.send(notifier.format_daily_watchlist(reports, risk))
+
+        state.last_daily_date = now.astimezone(
+            daily_report.BANGKOK).date().isoformat()
+        ok = sum(1 for r in reports if not r.error)
+        print(f"daily analysis sent for {ok}/{len(reports)} symbol(s)")
 
     # --- chart briefing: the running commentary on the market ---------
     gold = set(cfg.gold_symbols)
