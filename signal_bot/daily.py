@@ -28,6 +28,7 @@ from . import macro as MACRO
 from . import regime as REG
 from . import smc as S
 from . import strategy as STRAT
+from . import voters as VOTE
 
 BANGKOK = timezone(timedelta(hours=7))
 
@@ -92,6 +93,11 @@ class SymbolReport:
     plan_wait: Plan = field(default_factory=Plan)
     now_verdict: str = WAIT
     now_why: str = ""
+    # Adaptive Multi-Strategy: the ballot for each side, and the one that
+    # belongs to whichever side the report ended up leaning toward.
+    vote_buy: object = None
+    vote_sell: object = None
+    consensus: object = None
     error: str = ""
 
 
@@ -326,6 +332,29 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
         -1, st_d1, st_h4, st_h1, st_entry, sm, sm.ob_bear, entry_df, h1_df,
         weights, session, macro_dir, news_score, False)
 
+    # --- Adaptive Multi-Strategy: put both sides to the vote ------------
+    # Each side is judged by the techniques this regime actually calls for,
+    # so the report can say which ones back BUY, which back SELL, and where
+    # they contradict each other instead of only reporting two numbers.
+    if getattr(cfg, "strategy_voting", True):
+        macro_why = (MACRO.bias_for(macro_view, symbol)[1]
+                     if macro_view is not None else "ยังไม่มีข้อมูลภาพรวมมหภาค")
+        vote_ctx = {
+            "st_entry": st_entry, "st_d1": st_d1, "st_h4": st_h4,
+            "sm": sm, "df": entry_df, "reg": reg,
+            "strength": REG._directional_strength(entry_df),
+            "symbol": symbol, "session": session, "in_kill_zone": False,
+            "macro_dir": macro_dir, "macro_why": macro_why,
+            "news_ctx": news_ctx,
+        }
+        rep.vote_buy = VOTE.decide(1, vote_ctx)
+        rep.vote_sell = VOTE.decide(-1, vote_ctx)
+        influence = getattr(cfg, "vote_influence", 0.30)
+        rep.buy_score = A._clamp(
+            rep.buy_score + (rep.vote_buy.confidence - 50.0) * influence)
+        rep.sell_score = A._clamp(
+            rep.sell_score + (rep.vote_sell.confidence - 50.0) * influence)
+
     # --- which way the higher timeframes lean -------------------------
     votes = [rep.trends.get(tf) for tf in BIAS_TFS]
     ups, downs = votes.count("UP"), votes.count("DOWN")
@@ -387,6 +416,10 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
         rep.bias = SELL
     else:
         rep.bias = WAIT
+
+    rep.consensus = (rep.vote_buy if rep.bias == BUY else
+                     rep.vote_sell if rep.bias == SELL else
+                     rep.vote_buy if gap >= 0 else rep.vote_sell)
 
     if rep.bias == WAIT:
         blockers = (rep.plan_buy.waiting_for if gap >= 0

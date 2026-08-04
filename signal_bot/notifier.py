@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import requests
 
+from . import voters as VOTERS
+
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
@@ -112,6 +114,42 @@ def format_section(horizon: str, count: int) -> str:
             "━━━━━━━━━━━━━━")
 
 
+_VERDICT_ICON = {"สนับสนุน": "✅", "ค้าน": "❌", "เป็นกลาง": "➖"}
+
+
+def _vote_block(con, show_reasons: bool = True) -> list:
+    """The Strategy Voting System, shown as the ballot it actually is.
+
+    Every technique the regime selected gets a line with its own score and
+    its own reason, so a reader can see which ones carried the decision and
+    which ones argued against it - not just the number they averaged to.
+    """
+    if con is None:
+        return []
+    out = [
+        "━━━━━━━━━━━━━━",
+        "🗳 <b>การลงคะแนนของแต่ละเทคนิค</b>",
+        f"<i>{con.selection_why}</i>",
+    ]
+    for v in con.votes:
+        icon = _VERDICT_ICON.get(v.verdict, "➖")
+        out.append(f"{icon} <b>{v.label}</b> — {v.score:.0f}/100 ({v.verdict})")
+        if show_reasons and v.reasons:
+            out.append(f"     └ {v.reasons[0]}")
+    out.append(f"📊 คะแนนรวม <b>{con.score:.0f}</b> · "
+               f"ความสอดคล้อง <b>{con.agreement:.0%}</b> · "
+               f"ความมั่นใจหลังปรับ <b>{con.confidence:.0f}</b>")
+    if con.supporters:
+        out.append("✅ สนับสนุน: " + ", ".join(con.supporters))
+    if con.dissenters:
+        out.append("❌ ไม่สนับสนุน: " + ", ".join(con.dissenters))
+    out += ["", "🧠 <b>AI Reasoning — ทำไมถึงสรุปแบบนี้</b>"]
+    out += [f"• {r}" for r in con.reasoning]
+    out += ["", "🚫 <b>เทคนิคที่ระบบไม่ใช้ (ไม่เดา):</b>"]
+    out += [f"• <i>{u}</i>" for u in VOTERS.UNAVAILABLE]
+    return out
+
+
 def format_signal(cand, signal_id: int, prof=None) -> str:
     """The full signal message."""
     arrow = "📈" if cand.direction > 0 else "📉"
@@ -162,6 +200,7 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         "🧠 <b>เหตุผลในการวิเคราะห์:</b>",
     ]
     lines += [f"• {_esc(r)}" for r in cand.reasons]
+    lines += _vote_block(getattr(cand, "consensus", None))
     if getattr(cand, "risks", None):
         lines += ["", "⚠️ <b>ปัจจัยที่อาจทำให้แผนนี้ล้มเหลว:</b>"]
         lines += [f"• {_esc(r)}" for r in cand.risks]
@@ -802,6 +841,46 @@ def format_daily_overview(macro_view, reports, risk, memory_line: str = "") -> s
     return "\n".join(lines)
 
 
+def _mark(score: float) -> str:
+    return "✅" if score >= 65 else "❌" if score <= 35 else "➖"
+
+
+def _vote_table(rep) -> list:
+    """Both sides of the ballot, side by side, for the planning report.
+
+    A daily plan has to hold BUY and SELL open at once, so showing each
+    technique's score for both directions answers the question the report
+    exists to answer: what would have to change for the other side to win.
+    """
+    buy, sell = getattr(rep, "vote_buy", None), getattr(rep, "vote_sell", None)
+    if buy is None or sell is None:
+        return []
+    sell_by = {v.name: v for v in sell.votes}
+    # ASCII header: Thai glyphs do not hold a monospace column on mobile
+    rows = [f"{'Technique':<18}{'BUY':>5}  {'SELL':>5}"]
+    for v in buy.votes:
+        s = sell_by.get(v.name)
+        s_txt = f"{s.score:3.0f} {_mark(s.score)}" if s else "  -   "
+        rows.append(f"{v.label[:18]:<18}{v.score:3.0f} {_mark(v.score)}  {s_txt}")
+
+    out = ["<b>🗳 การลงคะแนนของแต่ละเทคนิค</b>",
+           f"<i>{buy.selection_why}</i>",
+           "<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>",
+           f"📊 BUY รวม <b>{buy.confidence:.0f}</b> (สอดคล้อง {buy.agreement:.0%})"
+           f" · SELL รวม <b>{sell.confidence:.0f}</b> (สอดคล้อง {sell.agreement:.0%})"]
+
+    chosen = getattr(rep, "consensus", None) or buy
+    out += ["", "<b>🧠 AI Reasoning — เหตุผลเบื้องหลังคำตัดสิน</b>"]
+    out += [f"• {r}" for r in chosen.reasoning]
+    if chosen.dissenters:
+        out.append("• ความเสี่ยงของแผน: "
+                   + ", ".join(chosen.dissenters)
+                   + " ยังไม่สนับสนุน หากราคาไม่ไปตามแผนเร็ว ให้ถอยก่อน")
+    out += ["<i>ไม่ใช้: " + " · ".join(u.split(" — ")[0] for u in VOTERS.UNAVAILABLE)
+            + " (ตีความได้หลายแบบ/ไม่มีข้อมูลจริง ระบบไม่เดา)</i>"]
+    return out
+
+
 def format_daily_symbol(rep) -> str:
     """One instrument: structure, zones, and the three plans."""
     if rep.error:
@@ -850,6 +929,9 @@ def format_daily_symbol(rep) -> str:
     lines += _plan_block(rep.plan_sell, rep.symbol, "PLAN B — SELL") + [""]
     if rep.plan_wait.side == "WAIT" and rep.plan_wait.waiting_for:
         lines += _plan_block(rep.plan_wait, rep.symbol, "PLAN C — WAIT") + [""]
+
+    # --- the ballot ------------------------------------------------------
+    lines += _vote_table(rep) + [""]
 
     # --- right now ------------------------------------------------------
     lines += ["<b>💡 ถ้าเข้าตอนนี้เลย</b>",

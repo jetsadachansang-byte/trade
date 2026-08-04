@@ -190,6 +190,21 @@ class Settings:
     min_regime_confidence: float = field(
         default_factory=lambda: _env_float("MIN_REGIME_CONFIDENCE", 20.0))
 
+    # --- Adaptive Multi-Strategy: the Strategy Voting System -------------
+    # Each technique the regime selected scores the trade on its own, and
+    # the spread of those scores adjusts the confidence. Set false to fall
+    # back to the blended category score alone.
+    strategy_voting: bool = field(
+        default_factory=lambda: _env_bool("STRATEGY_VOTING", True))
+    # How much the consensus is allowed to move the final score, in points
+    # per 50 points of consensus confidence away from neutral.
+    vote_influence: float = field(
+        default_factory=lambda: _env_float("VOTE_INFLUENCE", 0.30))
+    # Refuse the trade when the called techniques openly contradict each
+    # other. This is the brief's "conflict -> WAIT" rule.
+    vote_conflict_blocks: bool = field(
+        default_factory=lambda: _env_bool("VOTE_CONFLICT_BLOCKS", True))
+
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
     # รายงานวิเคราะห์กราฟรายชั่วโมง — ปิดไว้ เพราะบทวิเคราะห์รายวันตอน
