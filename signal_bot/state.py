@@ -45,6 +45,11 @@ class Signal:
     scores: dict = field(default_factory=dict)
     win_probability: float = 0.0
     expected_value: float = 0.0
+    # Dynamic Exit Engine: a trailing signal moves its own stop as the
+    # trade advances, so the stop distance has to survive between runs.
+    exit_mode: str = "fixed"
+    trail_distance: float = 0.0        # in price, 0 = fixed exits
+    trail_peak: float = 0.0            # best price reached so far
     bar_time: str = ""                 # entry bar this signal came from
     status: str = ACTIVE
     tp1_hit: bool = False

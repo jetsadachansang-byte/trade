@@ -138,6 +138,14 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         f"💰 {_esc(_GRADE_ADVICE.get(getattr(cand, 'grade', ''), ''))}",
         f"⏱ ระยะเวลาถือที่คาด: {_esc(cand.hold_time or '-')}",
         "━━━━━━━━━━━━━━",
+        "🎯 <b>แผนออก (คำนวณใหม่ทุกครั้ง ไม่ใช่ค่าตายตัว)</b>",
+        f"• รูปแบบ: <b>{_esc(getattr(cand, 'exit_label', '') or '-')}</b>"
+        + ("  🔒 ลาก SL ตาม" if getattr(cand, 'exit_mode', '') == 'trailing' else ""),
+        f"• โอกาสถึง TP1/TP2/TP3: "
+        f"{'/'.join(f'{x:.0f}%' for x in getattr(cand, 'prob_tp', (0, 0, 0)))}",
+        f"• โอกาสโดน SL: <b>{getattr(cand, 'prob_sl', 0):.0f}%</b>"
+        f" · Expected Drawdown {getattr(cand, 'expected_drawdown', 0):.2f}R",
+        "━━━━━━━━━━━━━━",
         "🏛 <b>บริบทสถาบัน</b>",
         f"• สภาพตลาด: <b>{_esc(getattr(cand, 'regime', '-') or '-')}</b>"
         f" (มั่นใจ {getattr(cand, 'regime_confidence', 0):.0f}%)",
@@ -157,6 +165,9 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
     if getattr(cand, "risks", None):
         lines += ["", "⚠️ <b>ปัจจัยที่อาจทำให้แผนนี้ล้มเหลว:</b>"]
         lines += [f"• {_esc(r)}" for r in cand.risks]
+    if getattr(cand, "exit_reasons", None):
+        lines += ["", "🎯 <b>ทำไมถึงเลือกแผนออกนี้:</b>"]
+        lines += [f"• {_esc(r)}" for r in cand.exit_reasons[:5]]
     lines += ["", "📌 <b>หมายเหตุ:</b>"]
     lines += [f"• {_esc(n)}" for n in cand.notes]
     lines += [
@@ -180,6 +191,16 @@ def format_tp(symbol: str, side: str, level: int, price: float,
         head = "🎯 <b>TP3 Hit</b> (3R) — สัญญาณจบสมบูรณ์"
         hint = "💡 ปิดไม้ที่เหลือทั้งหมด"
     return (f"{head}\n{_esc(symbol)} {side} @ <b>{price}</b>\n{hint}\n"
+            f"🆔 Signal ID: {signal_id}")
+
+
+def format_trail(symbol: str, side: str, old_sl: float, new_sl: float,
+                 signal_id: int) -> str:
+    """The stop moved up behind the trade."""
+    return (f"🔒 <b>เลื่อน Stop Loss ตามกำไร</b>\n"
+            f"{_esc(symbol)} {side}\n"
+            f"SL: {old_sl} → <b>{new_sl}</b>\n"
+            f"💡 ล็อกกำไรไว้แล้ว ปล่อยไม้ที่เหลือวิ่งต่อ\n"
             f"🆔 Signal ID: {signal_id}")
 
 
