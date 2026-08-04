@@ -86,6 +86,22 @@ def track_open_signals(state: State, tg: notifier.Telegram,
             tg.send(notifier.format_sl(sig.symbol, sig.side, sig.sl, sig.id))
             continue
 
+        # --- trailing stop: move the stop up behind the move -----------
+        # A trailing signal is only trailing if something actually moves
+        # the stop, so this is where the exit plan earns its name.
+        if sig.exit_mode == "trailing" and sig.trail_distance > 0:
+            peak = sig.trail_peak or sig.entry
+            peak = max(peak, high) if is_buy else min(peak, low)
+            if peak != sig.trail_peak:
+                sig.trail_peak = peak
+            moved = (peak - sig.trail_distance if is_buy
+                     else peak + sig.trail_distance)
+            # never widen a stop, and never trail past break-even backwards
+            if (is_buy and moved > sig.sl) or (not is_buy and moved < sig.sl):
+                old_sl, sig.sl = sig.sl, round(moved, 5)
+                tg.send(notifier.format_trail(sig.symbol, sig.side, old_sl,
+                                              sig.sl, sig.id))
+
         # --- take profits, announced once each, in order ---------------
         for level, target, already in (
             (1, sig.tp1, sig.tp1_hit), (2, sig.tp2, sig.tp2_hit), (3, sig.tp3, sig.tp3_hit)

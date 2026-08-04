@@ -15,6 +15,7 @@ from typing import Optional
 
 import pandas as pd
 
+from . import exits as EXITS
 from . import macro as MACRO
 from . import probability as PROB
 from . import regime as REG
@@ -63,6 +64,14 @@ class Candidate:
     memory_note: str = ""
     approval: str = ""
     invalidation: str = ""
+    # --- Dynamic Exit Engine -----------------------------------------
+    exit_mode: str = "fixed"
+    exit_label: str = ""
+    trail_atr: float = 0.0          # trail distance in ATR, 0 = fixed exits
+    prob_tp: tuple = (0.0, 0.0, 0.0)
+    prob_sl: float = 0.0
+    expected_drawdown: float = 0.0
+    exit_reasons: list = field(default_factory=list)
 
     @property
     def side(self) -> str:
@@ -462,13 +471,20 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     sl_dist = max(sl_dist, atr_value * prof.min_sl_atr)
     sl_dist = min(sl_dist, atr_value * prof.max_sl_atr)
 
+    # --- Dynamic Exit Engine: targets computed, never assumed ----------
+    # distance to the pool price is actually being drawn toward
+    if is_buy:
+        pool = (st_entry.last_high - price) if st_entry.last_high > price else 0.0
+    else:
+        pool = (price - st_entry.last_low) if st_entry.last_low < price else 0.0
+
     # --- confidence score ----------------------------------------------
     # volatility state from ATR against its own recent average
     atr_series = entry_df["high"].sub(entry_df["low"]).rolling(50).mean()
     baseline = float(atr_series.iloc[-2]) if len(atr_series) > 50 else atr_value
     vol_state = "high" if baseline > 0 and atr_value > baseline * 1.4 else "normal"
-    planned_rr = prof.tp_r[1]
     news_score = news_ctx.score if news_ctx is not None else 50.0
+    planned_rr = prof.tp_r[1]      # provisional, replaced by the exit plan
 
     parts = {
         "smc": _score_smc(direction, st_entry, ob, sm),
@@ -495,6 +511,23 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     view.steps_passed = 11
     view.waiting = "พร้อมเข้า — ผ่านครบทุกขั้น"
 
+    # --- Dynamic Exit Engine -------------------------------------------
+    momentum = min(1.0, max(0.0, REG._directional_strength(entry_df, 20)))
+    strength = REG._directional_strength(entry_df)
+    news_clear_now = not (news_ctx is not None and getattr(news_ctx, "upcoming", None))
+    plan = EXITS.build(
+        score=total, threshold=threshold, reg=reg, strength=strength,
+        atr=atr_value, sl_distance=sl_dist, liquidity_distance=pool,
+        volume_ratio=S.volume_ratio(entry_df), session=session,
+        macro_agrees=(1 if macro_dir == direction and macro_dir else
+                      -1 if macro_dir == -direction and macro_dir else 0),
+        news_clear=news_clear_now, momentum=momentum, recall=recall,
+        style_cap=prof.tp_r[2])
+
+    if not plan.positive:
+        return reject("11-ev", f"ทุกแผนออกให้ EV ติดลบ (ดีสุด {plan.expected_value:+.2f}R) "
+                               f"— ไม่คุ้มที่จะเข้า")
+
     # --- build the candidate -------------------------------------------
     digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
     def r(x: float) -> float:
@@ -509,10 +542,10 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         symbol=symbol, tier=tier, direction=direction,
         entry=r(price), entry_low=r(zone_low), entry_high=r(zone_high),
         sl=r(price - sl_dist if is_buy else price + sl_dist),
-        tp1=r(price + sl_dist * prof.tp_r[0] if is_buy else price - sl_dist * prof.tp_r[0]),
-        tp2=r(price + sl_dist * prof.tp_r[1] if is_buy else price - sl_dist * prof.tp_r[1]),
-        tp3=r(price + sl_dist * prof.tp_r[2] if is_buy else price - sl_dist * prof.tp_r[2]),
-        rr=prof.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
+        tp1=r(price + sl_dist * plan.tp_r[0] if is_buy else price - sl_dist * plan.tp_r[0]),
+        tp2=r(price + sl_dist * plan.tp_r[1] if is_buy else price - sl_dist * plan.tp_r[1]),
+        tp3=r(price + sl_dist * plan.tp_r[2] if is_buy else price - sl_dist * plan.tp_r[2]),
+        rr=plan.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
         profile=prof.name, grade=grade_for(total), hold_time=prof.hold_time,
         bar_time=str(entry_df.index[-2]),
         regime=reg.name, regime_confidence=reg.confidence,
@@ -521,16 +554,21 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         memory_note=recall.note,
     )
 
-    # --- LEVEL 6: is this trade actually worth the risk? ----------------
-    news_clear = not (news_ctx is not None and getattr(news_ctx, "upcoming", None))
-    odds = PROB.assess(total, threshold, prof.tp_r, recall,
-                       macro_agrees=(1 if macro_dir == direction and macro_dir else
-                                     -1 if macro_dir == -direction and macro_dir else 0),
-                       news_clear=news_clear)
-    cand.win_probability = odds.win_probability
-    cand.prob_source = odds.source
-    cand.expected_value = odds.expected_value
-    cand.expected_rr = odds.expected_rr
+    # --- LEVEL 6: the numbers come from the chosen exit plan ------------
+    cand.exit_mode, cand.exit_label = plan.mode, plan.label
+    cand.trail_atr = plan.trail_atr
+    cand.exit_reasons = list(plan.reasons)
+    cand.win_probability = plan.win_probability
+    cand.prob_source = "history" if (recall and recall.enough) else "model"
+    cand.expected_value = plan.expected_value
+    cand.expected_rr = plan.expected_rr
+    cand.prob_tp = plan.prob_tp
+    cand.prob_sl = plan.prob_sl
+    cand.expected_drawdown = plan.expected_drawdown
+    odds = PROB.Odds(win_probability=plan.win_probability,
+                     source=cand.prob_source, expected_rr=plan.expected_rr,
+                     expected_value=plan.expected_value,
+                     prob_tp1=plan.prob_tp[0], prob_sl=plan.prob_sl)
     cand.invalidation = (
         f"ราคาปิด{'ต่ำกว่า' if is_buy else 'สูงกว่า'} {cand.sl} บน {entry_tf} "
         f"= โครงสร้างเสีย ยกเลิกแผนนี้ทั้งหมด")
