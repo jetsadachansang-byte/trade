@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-04T06:55:25+00:00",
+  "updated": "2026-08-04T07:00:44+00:00",
   "last_signal_at": "2026-08-03T23:54:42+00:00",
   "last_briefing_at": "2026-08-04T06:25:01+00:00",
   "last_gold_scan_at": "2026-08-04T06:50:32+00:00",
@@ -69,6 +69,9 @@
       "scores": {},
       "win_probability": 0.0,
       "expected_value": 0.0,
+      "exit_mode": "fixed",
+      "trail_distance": 0.0,
+      "trail_peak": 0.0,
       "bar_time": "2026-08-03 23:50:00+00:00",
       "status": "SL_HIT",
       "tp1_hit": false,
