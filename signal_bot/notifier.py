@@ -229,7 +229,8 @@ def _is_long_hold(profile_name: str) -> bool:
     return bool(prof and prof.is_long_hold)
 
 
-def format_briefing(views, active: int, today: int, counts=None) -> str:
+def format_briefing(views, active: int, today: int, counts=None,
+                    primary=None) -> str:
     """One message covering every analysed symbol.
 
     Reports trend across timeframes, the levels that matter, and how far
@@ -238,6 +239,10 @@ def format_briefing(views, active: int, today: int, counts=None) -> str:
 
     `counts` is an optional (gold_today, gold_target, pair_today,
     pair_target) tuple, shown so the daily pacing is visible.
+
+    `primary` is the set of headline symbols (gold). They get their own
+    section in full detail at the top and are never trimmed away by the
+    ranking, because the whole system is built around them.
     """
     lines = ["📈 <b>วิเคราะห์กราฟ — ภาพรวมตลาด</b>",
              f"<i>สัญญาณวันนี้ {today} · กำลังติดตาม {active}</i>"]
@@ -246,11 +251,30 @@ def format_briefing(views, active: int, today: int, counts=None) -> str:
         lines.append(f"<i>ทอง {gold_today}/{gold_target} · "
                      f"คู่เงิน {pair_today}/{pair_target}</i>")
 
-    short_views = [v for v in views if not _is_long_hold(getattr(v, "profile", ""))]
-    long_views = [v for v in views if _is_long_hold(getattr(v, "profile", ""))]
+    primary = set(primary or ())
+    head_views = [v for v in views if v.symbol in primary]
+    rest_views = [v for v in views if v.symbol not in primary]
 
-    for group, header, top in ((short_views, "⚡ <b>สายเก็บสั้น (Day Trade / Scalp)</b>", 5),
-                               (long_views, "🚀 <b>สายถือยาว (Run Trend)</b>", 3)):
+    if head_views:
+        names = " / ".join(sorted({v.symbol for v in head_views}))
+        lines.append("")
+        lines.append(f"🥇 <b>{_esc(names)} (ทองคำ) — สินทรัพย์หลัก</b>")
+        lines.extend(_briefing_block(
+            sorted(head_views, key=lambda x: -x.steps_passed)))
+    elif primary:
+        # say it outright rather than letting gold vanish without a word
+        lines.append("")
+        lines.append("🥇 <b>ทองคำ</b>")
+        lines.append("━━━━━━━━━━━━━━")
+        lines.append("⚠️ <i>รอบนี้ยังไม่มีข้อมูลทอง — ดึงราคาไม่สำเร็จ</i>")
+
+    short_views = [v for v in rest_views
+                   if not _is_long_hold(getattr(v, "profile", ""))]
+    long_views = [v for v in rest_views
+                  if _is_long_hold(getattr(v, "profile", ""))]
+
+    for group, header, top in ((short_views, "⚡ <b>คู่เงิน — สายเก็บสั้น (Day Trade / Scalp)</b>", 4),
+                               (long_views, "🚀 <b>คู่เงิน — สายถือยาว (Run Trend)</b>", 2)):
         if not group:
             continue
         lines.append("")

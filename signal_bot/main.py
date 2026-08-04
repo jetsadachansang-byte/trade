@@ -337,15 +337,30 @@ def main(argv: list[str] | None = None) -> int:
             state, tg, cfg, now, cache, news_ctx, session, in_kz)
 
     # --- chart briefing: the running commentary on the market ---------
+    gold = set(cfg.gold_symbols)
     due = (cfg.briefing_minutes > 0
            and state.minutes_since_briefing(now) >= cfg.briefing_minutes)
+
+    # Gold runs on a 15-minute clock while the briefing runs on its own, so
+    # the two only coincide on one run in three - which is why gold kept
+    # missing from the report entirely. Hold the briefing back until a run
+    # that actually carries gold, unless it is so overdue that waiting would
+    # cost more than the missing section (gold data down, for instance).
+    gold_missing = bool(gold) and not any(v.symbol in gold for v in views)
+    overdue = (cfg.briefing_minutes > 0
+               and state.minutes_since_briefing(now) >= cfg.briefing_minutes * 2)
+    if due and gold_missing and not overdue and not args.brief:
+        print("briefing: deferred to the next run that includes gold")
+        due = False
+
     if views and (due or args.brief):
         tg.send(notifier.format_briefing(
             views, len(state.live()), state.issued_today(now),
-            counts=(state.issued_today(now, symbols=set(cfg.gold_symbols)),
+            counts=(state.issued_today(now, symbols=gold),
                     cfg.gold_daily_target,
-                    state.issued_today(now, exclude=set(cfg.gold_symbols)),
-                    cfg.pair_daily_target)))
+                    state.issued_today(now, exclude=gold),
+                    cfg.pair_daily_target),
+            primary=gold))
         # the spec's explicit "nothing qualifies right now" statement
         if cfg.no_setup_notice and not any(v.steps_passed >= 11 for v in views):
             tg.send(notifier.format_no_setup(news_ctx, views))
