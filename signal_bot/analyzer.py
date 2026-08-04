@@ -169,15 +169,40 @@ def grade_for(score: float) -> str:
     return "D"
 
 
-def _decide_direction(d1: S.Structure, h4: S.Structure, h1: S.Structure) -> int:
-    """Direction from structure only. H4 and H1 must agree, D1 must not oppose."""
+def _decide_direction(d1: S.Structure, h4: S.Structure, h1: S.Structure,
+                      strict: bool = False) -> int:
+    """Direction from structure only, never from an indicator.
+
+    Nothing may oppose: if any of the three higher timeframes points the
+    other way, there is no trade. What changed is the treatment of a
+    *neutral* timeframe. Requiring both H4 and H1 to be actively
+    directional threw away every setup where one of them happened to be
+    ranging, which is most of them - a clean H1 trend under a sideways H4
+    is an ordinary continuation, not a conflict.
+
+    `strict` restores the old behaviour for anyone who wants it.
+    """
     dir_h4, dir_h1 = h4.direction, h1.direction
-    if dir_h4 == 0 or dir_h1 == 0 or dir_h4 != dir_h1:
-        return 0
     dir_d1 = 1 if d1.trend == S.UPTREND else -1 if d1.trend == S.DOWNTREND else 0
-    if dir_d1 != 0 and dir_d1 != dir_h4:
+
+    if strict:
+        if dir_h4 == 0 or dir_h1 == 0 or dir_h4 != dir_h1:
+            return 0
+        if dir_d1 != 0 and dir_d1 != dir_h4:
+            return 0
+        return dir_h4
+
+    votes = [d for d in (dir_d1, dir_h4, dir_h1) if d != 0]
+    if not votes:
+        return 0                       # nothing is trending anywhere
+    if len(set(votes)) > 1:
+        return 0                       # something actively opposes
+    direction = votes[0]
+    # the entry timeframe's own ladder still has to have a say: a lone
+    # daily vote with both intermediate frames flat is not a setup
+    if dir_h4 == 0 and dir_h1 == 0:
         return 0
-    return dir_h4
+    return direction
 
 
 def _tf_support(st: S.Structure, direction: int) -> float:
@@ -366,7 +391,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     view.recent_bos, view.recent_choch = st_entry.recent_bos, st_entry.recent_choch
 
     # STEP 1: direction from structure
-    direction = _decide_direction(st_d1, st_h4, st_h1)
+    direction = _decide_direction(st_d1, st_h4, st_h1, cfg.strict_structure)
     if direction == 0:
         return reject("1-structure", f"โครงสร้าง {prof.htf_major}/{prof.htf_mid}/{prof.htf_minor} ไม่ตรงกัน")
     is_buy = direction > 0
@@ -575,7 +600,8 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
 
     # --- LEVEL 10: would a portfolio manager sign this off? -------------
     news_blocking = bool(news_ctx is not None and getattr(news_ctx, "blocking", False))
-    approved, verdict = PROB.approve(odds, reg, 11, 11, news_blocking)
+    approved, verdict = PROB.approve(odds, reg, 11, 11, news_blocking,
+                                     cfg.min_regime_confidence)
     cand.approval = verdict
     if not approved:
         view.waiting = f"ไม่ผ่านการอนุมัติ: {verdict}"

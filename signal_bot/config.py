@@ -86,7 +86,10 @@ class Settings:
     tier1: list[str] = field(default_factory=lambda: _env_list("TIER1_SYMBOLS", "XAUUSD"))
     tier2: list[str] = field(default_factory=lambda: _env_list(
         "TIER2_SYMBOLS", "EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))
-    tier3: list[str] = field(default_factory=lambda: _env_list("TIER3_SYMBOLS", ""))
+    # The crosses were mapped for both providers but never switched on,
+    # so the scan was covering eight instruments instead of fourteen.
+    tier3: list[str] = field(default_factory=lambda: _env_list(
+        "TIER3_SYMBOLS", "EURJPY,GBPJPY,EURGBP,AUDJPY,CADJPY,CHFJPY"))
     tier3_extra: float = field(default_factory=lambda: _env_float("TIER3_EXTRA", 2.0))
 
     # --- timeframes ---------------------------------------------------
@@ -105,14 +108,14 @@ class Settings:
     # never below the floor, and every signal is graded so a relaxed one
     # is visibly a relaxed one.
     daily_signal_target: int = field(
-        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 9))
+        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 14))
     # Gold is the primary instrument and is paced against its own target,
     # so a quiet FX session cannot eat into the gold count and vice versa.
     # Nothing caps it: if gold offers more than this, the extras are sent.
     gold_symbols: list[str] = field(
         default_factory=lambda: _env_list("GOLD_SYMBOLS", "XAUUSD"))
     gold_daily_target: int = field(
-        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 4))
+        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 5))
     # Gold spot comes from Twelve Data, whose free plan allows 800 requests
     # a day. Gold needs 8 series per scan, so scanning it every 5 minutes
     # like the pairs would need ~2,300 - well over the limit. Every 15
@@ -174,6 +177,15 @@ class Settings:
     macro_refresh_minutes: int = field(
         default_factory=lambda: _env_int("MACRO_REFRESH_MINUTES", 60))
     self_learning: bool = field(default_factory=lambda: _env_bool("SELF_LEARNING", True))
+    # Require every higher timeframe to be actively trending, not merely
+    # non-opposing. Far fewer setups; set true to restore it.
+    strict_structure: bool = field(
+        default_factory=lambda: _env_bool("STRICT_STRUCTURE", False))
+    # A regime this unclear is not worth trading. Kept low because an
+    # unconfident regime already blends its weights back toward neutral,
+    # so gating hard here would penalise it twice.
+    min_regime_confidence: float = field(
+        default_factory=lambda: _env_float("MIN_REGIME_CONFIDENCE", 15.0))
 
     # --- reporting ---------------------------------------------------------
     send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
