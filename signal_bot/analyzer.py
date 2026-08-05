@@ -70,6 +70,10 @@ class Candidate:
     # --- Adaptive Multi-Strategy: who voted, and what they said -------
     consensus: object = None          # voters.Consensus, when voting is on
     analysis_trends: dict = field(default_factory=dict)
+    # Where the quoted price came from, so "the price is wrong" can be
+    # checked rather than argued about.
+    quote_tf: str = ""
+    price_age_min: float = 0.0
     # --- Dynamic Exit Engine -----------------------------------------
     exit_mode: str = "fixed"
     exit_label: str = ""
@@ -137,6 +141,7 @@ class MarketView:
     score: float = 0.0
     data_age_min: float = 0.0        # how old the newest candle is
     data_stale: bool = False
+    quote_tf: str = ""               # timeframe the quoted price came from
     price_note: str = ""             # set when the feed is not the spot market
     news_verified: bool = False      # False = calendar could not be reached
     news_note: str = ""
@@ -147,6 +152,22 @@ class MarketView:
     consensus: object = None          # voters.Consensus, when voting is on
     # Timeframes read for context but never allowed to block an entry.
     analysis_trends: dict = field(default_factory=dict)
+
+
+def _freshest(frames: dict, fallback: str) -> tuple:
+    """(timeframe, frame) of the most recently updated chart available.
+
+    Every profile already loads a fast chart for context, so the price a
+    signal quotes should come from that rather than from a slow entry bar
+    that may not have closed for the best part of an hour.
+    """
+    from .profiles import TF_MINUTES
+    usable = [(TF_MINUTES.get(tf, 10 ** 6), tf) for tf, df in frames.items()
+              if df is not None and len(df) > 2]
+    if not usable:
+        return fallback, frames[fallback]
+    _, tf = min(usable)
+    return tf, frames[tf]
 
 
 def _clamp(value: float) -> float:
@@ -375,10 +396,18 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     h1_df = frames[prof.htf_minor]
     entry_df = frames[entry_tf]
 
+    # The quoted price comes from the freshest chart in hand, not from the
+    # entry timeframe. An H1 entry reading its price off the H1 bar quotes
+    # a number that can be fifty-nine minutes old while a one-minute chart
+    # for the same symbol is already loaded in this very run. Structure and
+    # ATR still come from the entry timeframe - only the price does not.
+    quote_tf, quote_df = _freshest(frames, entry_tf)
+
     view = MarketView(symbol=symbol, profile=prof.name)
     view.tf_names = (prof.htf_major, prof.htf_mid, prof.htf_minor, entry_tf)
-    view.price = float(entry_df["close"].iloc[-1])
-    view.data_age_min, view.data_stale = freshness(entry_df, entry_tf)
+    view.price = float(quote_df["close"].iloc[-1])
+    view.quote_tf = quote_tf
+    view.data_age_min, view.data_stale = freshness(quote_df, quote_tf)
     view.price_note = entry_df.attrs.get("proxy_note", "")
     if news_ctx is not None:
         view.news_verified = news_ctx.verified()
@@ -511,7 +540,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     view.steps_passed = 10
 
     # --- SL / TP plan --------------------------------------------------
-    price = float(entry_df["close"].iloc[-1])
+    price = float(quote_df["close"].iloc[-1])
     buffer = atr_value * 0.3
     if is_buy:
         sl_level = st_entry.last_low - buffer if st_entry.last_low > 0 else 0.0
@@ -657,6 +686,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         strategy_why=strategy_why, macro_note=macro_why,
         memory_note=recall.note, consensus=consensus,
         analysis_trends=dict(view.analysis_trends),
+        quote_tf=quote_tf, price_age_min=round(view.data_age_min, 1),
     )
 
     # --- LEVEL 6: the numbers come from the chosen exit plan ------------

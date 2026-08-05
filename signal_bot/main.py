@@ -80,7 +80,19 @@ def _close(sig: Signal, now: datetime, reason: str) -> None:
 def track_open_signals(state: State, tg: notifier.Telegram,
                        cfg: Settings, now: datetime,
                        cache: market_data.Cache) -> None:
-    """Update every live signal against the latest price of its symbol."""
+    """Update every live signal against every bar since it was last checked.
+
+    This used to read the newest bar only. A one-minute signal scanned every
+    five minutes therefore had four bars a run that nobody ever looked at,
+    and a target reached inside one of them was simply never announced -
+    the alert was lost, not late. Scans also get throttled, which widens the
+    gap further. So each run walks forward through every bar that has
+    appeared since the last check and applies the same rules to each.
+
+    Within a single bar the order of the high and the low is unknowable from
+    OHLC alone, so the stop is always tested first. That reports the worse
+    of the two outcomes, which is the only safe way to be wrong.
+    """
     for sig in state.live():
         try:
             # each signal is tracked on the timeframe it was issued from
@@ -89,50 +101,57 @@ def track_open_signals(state: State, tg: notifier.Telegram,
             print(f"track {sig.symbol}: {exc}")
             continue
 
-        high = float(df["high"].iloc[-1])
-        low = float(df["low"].iloc[-1])
+        bars = _bars_since(df, sig.checked_to)
+        if bars.empty:
+            continue
+        sig.checked_to = str(bars.index[-1])
         is_buy = sig.direction > 0
 
-        # --- stop loss (checked first: worst case wins) ----------------
-        if (is_buy and low <= sig.sl) or (not is_buy and high >= sig.sl):
-            sig.status = SL_HIT
-            _close(sig, now, "โดน SL")
-            tg.send(notifier.format_sl(sig.symbol, sig.side, sig.sl, sig.id))
-            continue
+        for stamp, bar in bars.iterrows():
+            if not sig.is_live:
+                break
+            high, low = float(bar["high"]), float(bar["low"])
 
-        # --- trailing stop: move the stop up behind the move -----------
-        # A trailing signal is only trailing if something actually moves
-        # the stop, so this is where the exit plan earns its name.
-        if sig.exit_mode == "trailing" and sig.trail_distance > 0:
-            peak = sig.trail_peak or sig.entry
-            peak = max(peak, high) if is_buy else min(peak, low)
-            if peak != sig.trail_peak:
-                sig.trail_peak = peak
-            moved = (peak - sig.trail_distance if is_buy
-                     else peak + sig.trail_distance)
-            # never widen a stop, and never trail past break-even backwards
-            if (is_buy and moved > sig.sl) or (not is_buy and moved < sig.sl):
-                old_sl, sig.sl = sig.sl, round(moved, 5)
-                tg.send(notifier.format_trail(sig.symbol, sig.side, old_sl,
-                                              sig.sl, sig.id))
+            # --- stop loss (checked first: worst case wins) ------------
+            if (is_buy and low <= sig.sl) or (not is_buy and high >= sig.sl):
+                sig.status = SL_HIT
+                _close(sig, now, "โดน SL")
+                tg.send(notifier.format_sl(sig.symbol, sig.side, sig.sl, sig.id))
+                break
 
-        # --- take profits, announced once each, in order ---------------
-        for level, target, already in (
-            (1, sig.tp1, sig.tp1_hit), (2, sig.tp2, sig.tp2_hit), (3, sig.tp3, sig.tp3_hit)
-        ):
-            if already:
-                continue
-            reached = high >= target if is_buy else low <= target
-            if not reached:
-                break                # cannot hit TP3 before TP2
-            if level == 1:
-                sig.tp1_hit, sig.status = True, TP1
-            elif level == 2:
-                sig.tp2_hit, sig.status = True, TP2
-            else:
-                sig.tp3_hit, sig.status = True, TP3
-                _close(sig, now, "ถึง TP3 ครบแผน")
-            tg.send(notifier.format_tp(sig.symbol, sig.side, level, target, sig.id))
+            # --- trailing stop: move the stop up behind the move -------
+            if sig.exit_mode == "trailing" and sig.trail_distance > 0:
+                peak = sig.trail_peak or sig.entry
+                peak = max(peak, high) if is_buy else min(peak, low)
+                if peak != sig.trail_peak:
+                    sig.trail_peak = peak
+                moved = (peak - sig.trail_distance if is_buy
+                         else peak + sig.trail_distance)
+                # never widen a stop, and never trail backwards
+                if (is_buy and moved > sig.sl) or (not is_buy and moved < sig.sl):
+                    old_sl, sig.sl = sig.sl, round(float(moved), 5)
+                    tg.send(notifier.format_trail(sig.symbol, sig.side, old_sl,
+                                                  sig.sl, sig.id))
+
+            # --- take profits, announced once each, in order -----------
+            for level, target, already in (
+                (1, sig.tp1, sig.tp1_hit), (2, sig.tp2, sig.tp2_hit),
+                (3, sig.tp3, sig.tp3_hit)
+            ):
+                if already:
+                    continue
+                reached = high >= target if is_buy else low <= target
+                if not reached:
+                    break                # cannot hit TP3 before TP2
+                if level == 1:
+                    sig.tp1_hit, sig.status = True, TP1
+                elif level == 2:
+                    sig.tp2_hit, sig.status = True, TP2
+                else:
+                    sig.tp3_hit, sig.status = True, TP3
+                    _close(sig, now, "ถึง TP3 ครบแผน")
+                tg.send(notifier.format_tp(sig.symbol, sig.side, level,
+                                           target, sig.id))
 
         # --- expiry: never reached TP1 within the window ---------------
         if sig.status == ACTIVE:
@@ -144,6 +163,23 @@ def track_open_signals(state: State, tg: notifier.Telegram,
                 tg.send(notifier.format_cancel(
                     sig.symbol, sig.side,
                     f"เกินเวลา {expiry} ชม. โดยไม่ถึง TP1", sig.id))
+
+
+def _bars_since(df, checked_to: str):
+    """Bars newer than the last one already examined.
+
+    With no marker - a signal issued before this existed, or one just sent -
+    only the newest bar is taken, so a fresh signal cannot be closed by
+    history that happened before it was ever issued.
+    """
+    if df is None or df.empty:
+        return df.iloc[0:0] if df is not None else df
+    if not checked_to:
+        return df.iloc[-1:]
+    newer = df.loc[df.index.astype(str) > checked_to]
+    # A long outage can leave hundreds of bars; the recent ones are what
+    # a stop or a target would have been hit in.
+    return newer.iloc[-500:]
 
 
 def pacing_shortfall(now: datetime, target: int, issued: int) -> tuple:
@@ -179,6 +215,11 @@ def profile_threshold(cfg: Settings, prof, shortfall: float) -> float:
     outcome rather than something to force.
     """
     base = cfg.number("SCORE_THRESHOLD", prof.score_threshold)
+    # With no daily quota there is no pace to keep, so the bar simply sits
+    # at the floor: every setup the system considers tradable is sent, and
+    # the grade on each one says how good it actually is.
+    if cfg.unlimited:
+        return cfg.min_score_floor
     if not cfg.adaptive_threshold or shortfall <= 0:
         return base
     give = (base - cfg.min_score_floor) * shortfall * prof.pace_weight
@@ -208,6 +249,9 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
                    and state.issued_today(now) >= cfg.max_signals_per_day)
     in_cooldown = (cfg.cooldown_minutes > 0
                    and state.minutes_since_last(now) < cfg.cooldown_minutes)
+    if cfg.unlimited:
+        print("signals: ไม่จำกัดจำนวนต่อวัน — "
+              f"เกณฑ์คะแนนยืนที่ {cfg.min_score_floor:.0f} ทุกสไตล์")
     sent = 0
     profiles = resolve_profiles(cfg.profiles)
 
@@ -287,6 +331,9 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
                 rr=cand.rr, score=cand.score, timeframe=cand.timeframe,
                 profile=prof.name, expiry_hours=prof.expiry_hours,
                 created=now.isoformat(timespec="seconds"), bar_time=cand.bar_time,
+                # start tracking from the bar the setup formed on, so the
+                # next run examines everything after it and nothing before
+                checked_to=cand.bar_time,
                 reasons=list(cand.reasons),
                 regime=cand.regime, strategies=list(cand.strategies),
                 scores=dict(cand.scores), win_probability=cand.win_probability,
@@ -476,10 +523,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"price source: {cache.source_report()}")
     gold_today = state.issued_today(now, symbols=set(cfg.gold_symbols))
     pair_today = state.issued_today(now, exclude=set(cfg.gold_symbols))
+    quota = ("ไม่จำกัด" if cfg.unlimited else
+             f"ทอง {gold_today}/{cfg.gold_daily_target}, "
+             f"คู่เงิน {pair_today}/{cfg.pair_daily_target}")
     print(f"done: {len(state.live())} live signal(s), "
           f"{state.issued_today(now)} issued today "
-          f"(ทอง {gold_today}/{cfg.gold_daily_target}, "
-          f"คู่เงิน {pair_today}/{cfg.pair_daily_target}) · {cache.stats()}")
+          f"(ทอง {gold_today}, คู่เงิน {pair_today} · {quota}) · {cache.stats()}")
     return 0
 
 

@@ -94,6 +94,8 @@ class SymbolReport:
     plan_wait: Plan = field(default_factory=Plan)
     now_verdict: str = WAIT
     now_why: str = ""
+    quote_tf: str = ""              # timeframe the quoted price came from
+    price_age_min: float = 0.0
     # Adaptive Multi-Strategy: the ballot for each side, and the one that
     # belongs to whichever side the report ended up leaning toward.
     vote_buy: object = None
@@ -338,7 +340,12 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
     rep = SymbolReport(symbol=symbol)
     try:
         entry_df = frames[PLAN_TF]
-        rep.price = float(entry_df["close"].iloc[-1])
+        # Plans are drawn on H1, but the price shown must be the freshest
+        # one loaded - an H1 close can be an hour behind the market.
+        quote_tf, quote_df = A._freshest(frames, PLAN_TF)
+        rep.price = float(quote_df["close"].iloc[-1])
+        rep.quote_tf = quote_tf
+        rep.price_age_min = A.freshness(quote_df, quote_tf)[0]
     except Exception as exc:            # noqa: BLE001 - one dead symbol is survivable
         rep.error = f"ไม่มีข้อมูล: {exc}"
         return rep

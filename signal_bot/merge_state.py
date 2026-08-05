@@ -47,6 +47,7 @@ def _progress(sig: dict) -> tuple:
         1 if sig.get("closed_at") else 0,          # finished beats running
         sum(1 for k in ("tp1_hit", "tp2_hit", "tp3_hit") if sig.get(k)),
         1 if sig.get("status") in ("SL_HIT", "CANCELLED", "TP3") else 0,
+        str(sig.get("checked_to") or ""),          # examined more bars
         abs(float(sig.get("trail_peak") or 0.0)),  # trailed further
     )
 
