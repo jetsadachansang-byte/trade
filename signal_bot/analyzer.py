@@ -15,6 +15,7 @@ from typing import Optional
 
 import pandas as pd
 
+from . import costs as COSTS
 from . import exits as EXITS
 from . import macro as MACRO
 from . import memory as MEM
@@ -523,6 +524,26 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     sl_dist = max(sl_dist, atr_value * prof.min_sl_atr)
     sl_dist = min(sl_dist, atr_value * prof.max_sl_atr)
 
+    # --- the stop has to survive the cost of being in the market -------
+    # ATR alone produced stops narrower than the spread on quiet pairs, and
+    # a stop inside the spread is a loss that has already happened. The
+    # floor is applied last so it beats the style's own ceiling: a stop
+    # wider than the style intended is a worse trade, a stop inside the
+    # spread is not a trade at all.
+    digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
+    floor, floor_why = COSTS.stop_floor(
+        symbol, entry_df, reg.volatility,
+        spread_multiple=cfg.min_sl_spreads,
+        noise_multiple=cfg.min_sl_candles, digits=digits)
+    ceiling = atr_value * prof.max_sl_atr
+    if floor > ceiling * cfg.sl_floor_stretch:
+        return reject("10-stop",
+                      f"ตลาดนิ่งเกินไปสำหรับ {entry_tf} — SL ที่ปลอดภัยต้องกว้าง "
+                      f"{floor:.5g} แต่สไตล์นี้รับได้แค่ {ceiling:.5g} "
+                      f"(สเปรดจะกินไม้นี้หมด)")
+    widened = floor > sl_dist
+    sl_dist = max(sl_dist, floor)
+
     # --- Dynamic Exit Engine: targets computed, never assumed ----------
     # distance to the pool price is actually being drawn toward
     if is_buy:
@@ -610,9 +631,13 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
                                f"— ไม่คุ้มที่จะเข้า")
 
     # --- build the candidate -------------------------------------------
-    digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
     def r(x: float) -> float:
-        return round(x, digits)
+        # float() first: ATR-derived values are numpy scalars, and a numpy
+        # float64 in the state file makes json.dumps refuse to save at all
+        return round(float(x), digits)
+
+    raw_tps = [price + sl_dist * k * (1 if is_buy else -1) for k in plan.tp_r]
+    tp_levels = COSTS.space_ladder(price, raw_tps, direction, digits)
 
     if ob.valid and ob.mitigating:
         zone_low, zone_high = ob.bottom, ob.top
@@ -623,9 +648,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         symbol=symbol, tier=tier, direction=direction,
         entry=r(price), entry_low=r(zone_low), entry_high=r(zone_high),
         sl=r(price - sl_dist if is_buy else price + sl_dist),
-        tp1=r(price + sl_dist * plan.tp_r[0] if is_buy else price - sl_dist * plan.tp_r[0]),
-        tp2=r(price + sl_dist * plan.tp_r[1] if is_buy else price - sl_dist * plan.tp_r[1]),
-        tp3=r(price + sl_dist * plan.tp_r[2] if is_buy else price - sl_dist * plan.tp_r[2]),
+        tp1=tp_levels[0], tp2=tp_levels[1], tp3=tp_levels[2],
         rr=plan.tp_r[1], score=round(total, 1), timeframe=entry_tf, scores=parts,
         profile=prof.name, grade=grade_for(total), hold_time=prof.hold_time,
         bar_time=str(entry_df.index[-2]),
@@ -691,6 +714,10 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         f"{zone_name} Zone {'✔' if favourable else '⚠️'} (rangePos {sm.range_pos:.2f})"
         + (" | OTE ✔" if in_ote else ""))
 
+    if widened:
+        cand.notes.append(
+            f"SL ถูกขยายให้กว้างขึ้นจากที่โครงสร้างบอก เพราะแคบกว่านั้นสเปรด"
+            f"และการแกว่งปกติจะกินไม้นี้ทิ้ง — {floor_why}")
     cand.notes.append(f"รอแท่งเทียน {entry_tf} ปิดยืนยันก่อนเข้า")
     cand.notes.append(f"ยกเลิกสัญญาณหากราคาปิดเลย SL ({cand.sl}) ก่อนเข้าไม้")
     cand.notes.append("หลีกเลี่ยงการเข้าใกล้ช่วงประกาศข่าวสำคัญ")
