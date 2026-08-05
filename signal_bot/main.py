@@ -324,8 +324,6 @@ def main(argv: list[str] | None = None) -> int:
                         help="print messages instead of sending to Telegram")
     parser.add_argument("--status", action="store_true",
                         help="always send the status report this run")
-    parser.add_argument("--brief", action="store_true",
-                        help="always send the chart briefing this run")
     parser.add_argument("--daily", action="store_true",
                         help="send the daily market analysis now, ignoring the clock")
     parser.add_argument("--summary", action="store_true",
@@ -438,11 +436,16 @@ def main(argv: list[str] | None = None) -> int:
                 macro_view, news_ctx, session))
 
         risk = daily_report.risk_level([r for r in reports if not r.error], macro_view)
-        tg.send(notifier.format_daily_overview(
-            macro_view, reports, risk, memory_bank.summary(state.signals), slot))
-        for rep in reports:
-            tg.send(notifier.format_daily_symbol(rep))
-        tg.send(notifier.format_daily_watchlist(reports, risk))
+        gold = set(cfg.gold_symbols)
+        counts = (state.issued_today(now, symbols=gold), cfg.gold_daily_target,
+                  state.issued_today(now, exclude=gold), cfg.pair_daily_target)
+        # Two messages, not ten: the tape with every pair on one line, then
+        # the detail only for pairs that actually have a side.
+        tg.send(notifier.format_session_overview(
+            macro_view, reports, risk, slot, counts))
+        plans = notifier.format_session_plans(reports)
+        if plans:
+            tg.send(plans)
 
         state.last_daily_slot = daily_report.slot_key(now, slot)
         state.last_daily_date = now.astimezone(
@@ -452,60 +455,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"market analysis ({label} {slot:02d}:00) sent for "
               f"{ok}/{len(reports)} symbol(s)")
 
-    # --- chart briefing: the running commentary on the market ---------
-    gold = set(cfg.gold_symbols)
-    due = (cfg.briefing_minutes > 0
-           and state.minutes_since_briefing(now) >= cfg.briefing_minutes)
-
-    # Gold runs on a 15-minute clock while the briefing runs on its own, so
-    # the two only coincide on one run in three - which is why gold kept
-    # missing from the report entirely. Hold the briefing back until a run
-    # that actually carries gold, unless it is so overdue that waiting would
-    # cost more than the missing section (gold data down, for instance).
-    gold_missing = bool(gold) and not any(v.symbol in gold for v in views)
-    overdue = (cfg.briefing_minutes > 0
-               and state.minutes_since_briefing(now) >= cfg.briefing_minutes * 2)
-    if due and gold_missing and not overdue and not args.brief:
-        print("briefing: deferred to the next run that includes gold")
-        due = False
-
-    if views and (due or args.brief):
-        counts = (state.issued_today(now, symbols=gold), cfg.gold_daily_target,
-                  state.issued_today(now, exclude=gold), cfg.pair_daily_target)
-
-        # One message per instrument, not one combined report: each pair is
-        # a separate decision and reads better without the others in the way.
-        by_symbol: dict = {}
-        for v in views:
-            by_symbol.setdefault(v.symbol, []).append(v)
-
-        def order(item):
-            symbol, group = item
-            # gold leads, then whichever symbol is closest to a signal
-            return (symbol not in gold, -max(v.steps_passed for v in group))
-
-        # LEVEL 1 leads the round: the global picture before any chart
-        if cfg.use_macro:
-            tg.send(notifier.format_macro(
-                macro_view, memory_bank.summary(state.signals)))
-
-        first = True
-        for symbol, group in sorted(by_symbol.items(), key=order):
-            tg.send(notifier.format_symbol_report(
-                symbol, group,
-                counts=counts if first else None,   # daily tally once, not 8x
-                primary=symbol in gold))
-            first = False
-
-        # the spec's explicit "nothing qualifies right now" statement
-        if cfg.no_setup_notice and not any(v.steps_passed >= 11 for v in views):
-            tg.send(notifier.format_no_setup(news_ctx, views))
-        state.last_briefing_at = now.isoformat(timespec="seconds")
-        print(f"briefing sent for {len(by_symbol)} symbol(s)")
+    # The rolling chart briefing used to run on its own clock and was the
+    # only thing left that could fire on a scan cadence. Reports now belong
+    # to sessions, so it is retired rather than left switched off: a stale
+    # BRIEFING_MINUTES repository variable must not be able to bring the
+    # five-minute flood back.
 
     state.save()
 
-    if args.status or cfg.send_status_report:
+    # Status goes out only when explicitly asked for. It used to honour a
+    # repository variable, which meant one setting turned every scan into a
+    # message.
+    if args.status:
         tg.send(notifier.format_status(
             rejections, len(state.live()), state.issued_today(now), errors))
 
