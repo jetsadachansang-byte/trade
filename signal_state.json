@@ -1,6 +1,6 @@
 {
-  "updated": "2026-08-05T04:21:01+00:00",
-  "last_signal_at": "2026-08-04T20:43:29+00:00",
+  "updated": "2026-08-05T04:25:37+00:00",
+  "last_signal_at": "2026-08-05T04:25:20+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
   "last_gold_scan_at": "2026-08-05T04:13:57+00:00",
   "macro": {
@@ -340,6 +340,69 @@
         "Order Block ✔ (คุณภาพ 65/100)",
         "Fair Value Gap ✔ (mitigated)",
         "Premium Zone ✔ (rangePos 0.88)",
+        "ข่าว: ข่าวยังไม่ให้ทิศทางชัดกับคู่นี้"
+      ]
+    },
+    {
+      "id": 1785903920,
+      "symbol": "CADJPY",
+      "tier": 3,
+      "direction": -1,
+      "entry": 111.89,
+      "entry_low": 111.89,
+      "entry_high": 111.92,
+      "sl": 111.9,
+      "tp1": 111.88,
+      "tp2": 111.88,
+      "tp3": 111.88,
+      "rr": 1.5,
+      "score": 75.7,
+      "timeframe": "M1",
+      "created": "2026-08-05T04:25:20+00:00",
+      "profile": "turbo",
+      "expiry_hours": 2,
+      "regime": "Liquidity Hunt",
+      "strategies": [
+        "ICT Liquidity Sweep",
+        "SMC",
+        "Wyckoff Spring"
+      ],
+      "scores": {
+        "smc": 76.5,
+        "liquidity": 90.0,
+        "trend": 75.0,
+        "ict": 70.0,
+        "volume": 65.0,
+        "indicator": 0.0,
+        "rr": 25.0,
+        "spread": 45.0,
+        "news": 100.0,
+        "macro": 50.0,
+        "consensus": 66.4
+      },
+      "win_probability": 56.4,
+      "expected_value": 0.121,
+      "exit_mode": "fixed",
+      "trail_distance": 0.0,
+      "trail_peak": 0.0,
+      "bar_time": "2026-08-05 04:24:00+00:00",
+      "closed_at": "",
+      "close_reason": "",
+      "status": "ACTIVE",
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "reasons": [
+        "สภาพตลาด: Liquidity Hunt (มั่นใจ 48%)",
+        "กลยุทธ์ที่เลือกใช้: ICT Liquidity Sweep, SMC, Wyckoff Spring",
+        "มติเทคนิค: สนับสนุน 5/7 · สอดคล้อง 39% · ความมั่นใจ 66",
+        "Market Structure: M30:DOWN M15:DOWN M5:SIDE",
+        "BOS ✔",
+        "CHoCH ✔",
+        "Liquidity Sweep ✔",
+        "Order Block ✔ (คุณภาพ 55/100)",
+        "Fair Value Gap ✔ (mitigated)",
+        "Premium Zone ✔ (rangePos 1.00)",
         "ข่าว: ข่าวยังไม่ให้ทิศทางชัดกับคู่นี้"
       ]
     }
