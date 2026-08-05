@@ -137,15 +137,18 @@ class Settings:
     # guarantee - it lowers the score bar when the day is running behind,
     # never below the floor, and every signal is graded so a relaxed one
     # is visibly a relaxed one.
+    # 0 = ไม่จำกัดจำนวนต่อวัน ระบบจะส่งทุกจุดเข้าที่ผ่านเกณฑ์ทั้งหมด
+    # เมื่อไม่มีเป้า การผ่อนเกณฑ์ตามจังหวะก็ไม่มีความหมาย เกณฑ์คะแนนจึงยืน
+    # ที่พื้น (MIN_SCORE_FLOOR) ตลอด — ได้ไม้มากที่สุดเท่าที่ระบบยอมรับได้
     daily_signal_target: int = field(
-        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 7))
+        default_factory=lambda: _env_int("DAILY_SIGNAL_TARGET", 0))
     # Gold is the primary instrument and is paced against its own target,
     # so a quiet FX session cannot eat into the gold count and vice versa.
     # Nothing caps it: if gold offers more than this, the extras are sent.
     gold_symbols: list[str] = field(
         default_factory=lambda: _env_list("GOLD_SYMBOLS", "XAUUSD"))
     gold_daily_target: int = field(
-        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 3))
+        default_factory=lambda: _env_int("GOLD_DAILY_TARGET", 0))
     # Gold spot comes from Twelve Data, whose free plan allows 800 requests
     # a day. Gold needs 8 series per scan, so scanning it every 5 minutes
     # like the pairs would need ~2,300 - well over the limit. Every 15
@@ -286,6 +289,11 @@ class Settings:
 
     def is_gold(self, symbol: str) -> bool:
         return symbol in self.gold_symbols
+
+    @property
+    def unlimited(self) -> bool:
+        """No daily quota: send every entry that clears the gates."""
+        return self.daily_signal_target <= 0
 
     @property
     def pair_daily_target(self) -> int:

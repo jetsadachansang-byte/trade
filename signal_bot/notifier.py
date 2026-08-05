@@ -175,6 +175,9 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         f"📊 <b>สินทรัพย์: {_esc(cand.symbol)}</b>",
         f"{arrow} <b>ประเภท: {cand.side}</b>",
         "━━━━━━━━━━━━━━",
+        f"💹 ราคาล่าสุด <b>{cand.entry}</b>"
+        + (f" <i>(จาก {_esc(cand.quote_tf)} · เก่า {cand.price_age_min:.0f} นาที)</i>"
+           if getattr(cand, "quote_tf", "") else ""),
         f"🎯 ราคาเข้า (Entry Zone): <b>{cand.entry_low} – {cand.entry_high}</b>",
         f"🛑 Stop Loss: <b>{cand.sl}</b>",
         f"🎯 Take Profit 1: {cand.tp1}",
@@ -396,7 +399,12 @@ def format_session_overview(macro_view, reports, risk, slot, counts=None) -> str
     lines.append(f"⚖️ ความเสี่ยง: <b>{_esc(label)}</b> — {_esc(risk_why)}")
     if counts:
         g, gt, p, pt = counts
-        lines.append(f"📨 สัญญาณวันนี้: ทอง {g}/{gt} · คู่เงิน {p}/{pt}")
+        # "1/0" reads like an error; with no quota there is nothing to be
+        # out of, only a count of what the market has actually offered.
+        quota = (f"ทอง {g} · คู่เงิน {p} <i>(ไม่จำกัดจำนวน)</i>"
+                 if gt <= 0 and pt <= 0 else
+                 f"ทอง {g}/{gt} · คู่เงิน {p}/{pt}")
+        lines.append(f"📨 สัญญาณวันนี้: {quota}")
 
     ok = [r for r in reports if not r.error]
     rows = [f"{'Pair':<8}{'Bias':>5}{'BUY':>5}{'SELL':>6}  ตลาด"]
@@ -423,7 +431,9 @@ def format_session_plans(reports) -> str:
         icon = _BIAS_ICON.get(r.bias, "")
         lines += [
             "━━━━━━━━━━━━━━",
-            f"{icon} <b>{_esc(r.symbol)} {r.bias}</b> · ราคา {_fmt(r.price, r.symbol)}",
+            f"{icon} <b>{_esc(r.symbol)} {r.bias}</b> · ราคา {_fmt(r.price, r.symbol)}"
+            + (f" <i>({_esc(r.quote_tf)} · {r.price_age_min:.0f} นาที)</i>"
+               if getattr(r, "quote_tf", "") else ""),
             f"เข้า <b>{plan.entry_low} – {plan.entry_high}</b> · SL <b>{plan.sl}</b>",
             f"TP {_tp_list(plan.tp, r.symbol)} · RR 1:{plan.rr:.1f}"
             f" · EV {plan.expected_value:+.2f}R",

@@ -55,6 +55,11 @@ class Signal:
     # trading day it actually happened on rather than the day it was issued.
     closed_at: str = ""                # ISO-8601 UTC, "" while still running
     close_reason: str = ""             # short Thai description for the review
+    # Timestamp of the newest bar already examined for TP/SL. Tracking used
+    # to look only at the latest bar, so on an M1 signal scanned every five
+    # minutes four bars went unchecked and a target hit inside them was
+    # never announced.
+    checked_to: str = ""
     status: str = ACTIVE
     tp1_hit: bool = False
     tp2_hit: bool = False
