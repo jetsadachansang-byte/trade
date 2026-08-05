@@ -1,6 +1,6 @@
 {
-  "updated": "2026-08-05T17:15:50+00:00",
-  "last_signal_at": "2026-08-05T04:25:20+00:00",
+  "updated": "2026-08-05T17:20:48+00:00",
+  "last_signal_at": "2026-08-05T17:20:26+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
   "last_gold_scan_at": "2026-08-05T17:06:27+00:00",
   "macro": {
@@ -403,6 +403,69 @@
         "Order Block ✔ (คุณภาพ 55/100)",
         "Fair Value Gap ✔ (mitigated)",
         "Premium Zone ✔ (rangePos 1.00)",
+        "ข่าว: ข่าวยังไม่ให้ทิศทางชัดกับคู่นี้"
+      ]
+    },
+    {
+      "id": 1785950426,
+      "symbol": "GBPUSD",
+      "tier": 2,
+      "direction": 1,
+      "entry": 1.34606,
+      "entry_low": 1.34544,
+      "entry_high": 1.34698,
+      "sl": 1.34484,
+      "tp1": 1.3474,
+      "tp2": 1.34903,
+      "tp3": 1.35107,
+      "rr": 2.43,
+      "score": 76.0,
+      "timeframe": "H1",
+      "created": "2026-08-05T17:20:26+00:00",
+      "profile": "intraday",
+      "expiry_hours": 24,
+      "regime": "Liquidity Hunt",
+      "strategies": [
+        "ICT Liquidity Sweep",
+        "SMC",
+        "Wyckoff Spring"
+      ],
+      "scores": {
+        "smc": 62.4,
+        "liquidity": 75.0,
+        "trend": 80.0,
+        "ict": 85.0,
+        "volume": 35.0,
+        "indicator": 50.0,
+        "rr": 75.0,
+        "spread": 85.0,
+        "news": 100.0,
+        "macro": 50.0,
+        "consensus": 71.0
+      },
+      "win_probability": 49.3,
+      "expected_value": 0.204,
+      "exit_mode": "fixed",
+      "trail_distance": 0.0,
+      "trail_peak": 0.0,
+      "bar_time": "2026-08-05 17:00:00+00:00",
+      "closed_at": "",
+      "close_reason": "",
+      "checked_to": "2026-08-05 17:00:00+00:00",
+      "status": "ACTIVE",
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "reasons": [
+        "สภาพตลาด: Liquidity Hunt (มั่นใจ 37%)",
+        "กลยุทธ์ที่เลือกใช้: ICT Liquidity Sweep, SMC, Wyckoff Spring",
+        "มติเทคนิค: สนับสนุน 5/7 · สอดคล้อง 47% · ความมั่นใจ 71",
+        "Market Structure: D1:SIDE H4:UP H1:UP",
+        "BOS ✔",
+        "Liquidity Sweep ✔",
+        "Order Block ✔ (คุณภาพ 58/100)",
+        "Fair Value Gap ✔ (mitigated)",
+        "Discount Zone ✔ (rangePos 0.26) | OTE ✔",
         "ข่าว: ข่าวยังไม่ให้ทิศทางชัดกับคู่นี้"
       ]
     }
