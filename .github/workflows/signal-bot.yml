@@ -28,10 +28,6 @@ on:
         description: "ข้ามการเช็คเวลาตลาด/kill zone (สำหรับทดสอบ)"
         type: boolean
         default: false
-      brief:
-        description: "ส่งรายงานวิเคราะห์กราฟทันที (แนวโน้ม + โซนสำคัญ)"
-        type: boolean
-        default: false
       daily:
         description: "ส่งบทวิเคราะห์ตลาดรายวันทันที (ไม่ต้องรอ 06:00 น.)"
         type: boolean
@@ -140,12 +136,16 @@ jobs:
           REQUIRE_PREMIUM_DISCOUNT: ${{ vars.REQUIRE_PREMIUM_DISCOUNT }}
           REQUIRE_MITIGATION: ${{ vars.REQUIRE_MITIGATION }}
           MIN_OB_QUALITY: ${{ vars.MIN_OB_QUALITY }}
-          SEND_STATUS_REPORT: ${{ vars.SEND_STATUS_REPORT }}
-          BRIEFING_MINUTES: ${{ vars.BRIEFING_MINUTES }}
           DAILY_REPORT: ${{ vars.DAILY_REPORT }}
-          DAILY_REPORT_HOUR: ${{ vars.DAILY_REPORT_HOUR }}
+          DAILY_REPORT_HOURS: ${{ vars.DAILY_REPORT_HOURS }}
+          DAILY_SUMMARY: ${{ vars.DAILY_SUMMARY }}
+          DAILY_SUMMARY_HOUR: ${{ vars.DAILY_SUMMARY_HOUR }}
+          MIN_ENTRY_TF: ${{ vars.MIN_ENTRY_TF }}
+          GOLD_MIN_ENTRY_TF: ${{ vars.GOLD_MIN_ENTRY_TF }}
+          MIN_SL_SPREADS: ${{ vars.MIN_SL_SPREADS }}
+          STRATEGY_VOTING: ${{ vars.STRATEGY_VOTING }}
+          VOTE_CONFLICT_BLOCKS: ${{ vars.VOTE_CONFLICT_BLOCKS }}
           DAILY_SYMBOLS: ${{ vars.DAILY_SYMBOLS }}
-          NO_SETUP_NOTICE: ${{ vars.NO_SETUP_NOTICE }}
           USE_NEWS: ${{ vars.USE_NEWS }}
           NEWS_PRE_MIN: ${{ vars.NEWS_PRE_MIN }}
           NEWS_POST_MIN: ${{ vars.NEWS_POST_MIN }}
@@ -153,14 +153,12 @@ jobs:
           # ตัวเลือกจากปุ่ม Run workflow
           RUN_STATUS: ${{ inputs.status }}
           RUN_IGNORE_HOURS: ${{ inputs.ignore_hours }}
-          RUN_BRIEF: ${{ inputs.brief }}
           RUN_DAILY: ${{ inputs.daily }}
           RUN_SUMMARY: ${{ inputs.summary }}
         run: |
           args=""
           [ "$RUN_STATUS" = "true" ] && args="$args --status"
           [ "$RUN_IGNORE_HOURS" = "true" ] && args="$args --ignore-hours"
-          [ "$RUN_BRIEF" = "true" ] && args="$args --brief"
           [ "$RUN_DAILY" = "true" ] && args="$args --daily"
           [ "$RUN_SUMMARY" = "true" ] && args="$args --summary"
           echo "รันคำสั่ง: python -m signal_bot.main $args"

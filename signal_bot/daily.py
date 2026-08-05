@@ -126,7 +126,15 @@ def slot_for(now: datetime, hours) -> int | None:
 
 
 def slot_key(now: datetime, hour: int) -> str:
-    return f"{now.astimezone(BANGKOK).date().isoformat()}#{hour}"
+    """The marker for one session's report, as a chronologically sortable key.
+
+    The hour is zero-padded for a reason. State is merged between runs by
+    taking the larger string, and "2026-08-05#6" sorts *above*
+    "2026-08-05#14" because "6" > "1". That reverted the afternoon marker
+    to the morning one on every save, so the afternoon report was owed
+    again within five minutes - forever.
+    """
+    return f"{now.astimezone(BANGKOK).date().isoformat()}#{hour:02d}"
 
 
 def due(state, now: datetime, hours=(6,)) -> int | None:

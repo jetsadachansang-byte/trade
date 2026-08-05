@@ -23,9 +23,22 @@ from pathlib import Path
 
 # Dates and timestamps are ISO-8601, so a plain string comparison already
 # orders them correctly and the later one wins.
-FORWARD_ONLY = ("last_signal_at", "last_briefing_at", "last_gold_scan_at",
-                "last_daily_date", "last_daily_slot",
-                "last_summary_date", "updated")
+FORWARD_ONLY = ("last_signal_at", "last_gold_scan_at",
+                "last_daily_date", "last_summary_date", "updated")
+
+# "YYYY-MM-DD#HH" markers are compared by date and hour, not as raw text.
+# Padding makes the plain string comparison correct today, but a marker
+# that silently goes backwards costs a report resent every scan, so this
+# does not rely on the format staying padded.
+SLOT_KEYS = ("last_daily_slot",)
+
+
+def _slot_rank(value: str) -> tuple:
+    date, _, hour = (value or "").partition("#")
+    try:
+        return (date, int(hour))
+    except ValueError:
+        return (date, -1)
 
 
 def _progress(sig: dict) -> tuple:
@@ -49,6 +62,9 @@ def merge(mine: dict, theirs: dict) -> dict:
 
     for key in FORWARD_ONLY:
         out[key] = max(mine.get(key, "") or "", theirs.get(key, "") or "")
+    for key in SLOT_KEYS:
+        out[key] = max(mine.get(key, "") or "", theirs.get(key, "") or "",
+                       key=_slot_rank)
 
     # The macro snapshot is a cache; this run may have just refreshed it.
     if mine.get("macro"):

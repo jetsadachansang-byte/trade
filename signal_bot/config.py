@@ -236,10 +236,8 @@ class Settings:
         default_factory=lambda: _env_bool("VOTE_CONFLICT_BLOCKS", True))
 
     # --- reporting ---------------------------------------------------------
-    send_status_report: bool = field(default_factory=lambda: _env_bool("SEND_STATUS_REPORT", False))
-    # รายงานวิเคราะห์กราฟรายชั่วโมง — ปิดไว้ เพราะบทวิเคราะห์รายวันตอน
-    # 06:00 น. ทำหน้าที่นี้แทนแล้ว ตั้งเป็นนาทีถ้าอยากได้ระหว่างวันด้วย
-    briefing_minutes: int = field(default_factory=lambda: _env_int("BRIEFING_MINUTES", 0))
+    # Status is sent only on request now (--status). It was a repository
+    # variable, which meant one setting turned every scan into a message.
 
     # --- บทวิเคราะห์ตลาดรายวัน (Daily Market Analysis) ------------------
     daily_report: bool = field(default_factory=lambda: _env_bool("DAILY_REPORT", True))
@@ -259,8 +257,7 @@ class Settings:
     daily_symbols: list[str] = field(default_factory=lambda: _env_list(
         "DAILY_SYMBOLS",
         "XAUUSD,EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))
-    # แจ้ง "ยังไม่มีจุดเข้า" ทุกกี่นาที (0 = ปิด) - ต่อท้ายรายงานภาพรวม
-    no_setup_notice: bool = field(default_factory=lambda: _env_bool("NO_SETUP_NOTICE", True))
+
 
     # --- scoring weights ---------------------------------------------------
     weights: dict[str, float] = field(default_factory=lambda: {
