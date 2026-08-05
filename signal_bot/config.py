@@ -91,6 +91,18 @@ class Settings:
     gold_min_entry_tf: str = field(
         default_factory=lambda: _env_str("GOLD_MIN_ENTRY_TF", "M1").upper())
 
+    # --- SL ต้องกว้างพอที่จะไม่ถูกสเปรดและการแกว่งปกติกินทิ้ง -------------
+    # ATR อย่างเดียวเคยให้ SL แคบกว่าสเปรด (CADJPY เคยได้ SL 0.1 pip ขณะที่
+    # สเปรดราว 2.5 pip) SL ที่แคบกว่าสเปรดไม่ใช่ SL แคบ แต่คือไม้ที่แพ้ไปแล้ว
+    min_sl_spreads: float = field(
+        default_factory=lambda: _env_float("MIN_SL_SPREADS", 6.0))
+    min_sl_candles: float = field(
+        default_factory=lambda: _env_float("MIN_SL_CANDLES", 1.2))
+    # ถ้า SL ขั้นต่ำกว้างกว่าเพดานของสไตล์เกินเท่านี้ แปลว่าไทม์เฟรมนี้เทรด
+    # คู่นี้ไม่ได้ในสภาพตลาดตอนนี้ — ไม่ส่งดีกว่าส่งไม้ที่เรขาคณิตพัง
+    sl_floor_stretch: float = field(
+        default_factory=lambda: _env_float("SL_FLOOR_STRETCH", 2.5))
+
     def min_entry_minutes(self, symbol: str) -> int:
         """Smallest entry timeframe this symbol may trade, in minutes."""
         from .profiles import TF_MINUTES

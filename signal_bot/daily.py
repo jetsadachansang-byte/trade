@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 from . import analyzer as A
+from . import costs as COSTS
 from . import exits as EXITS
 from . import macro as MACRO
 from . import regime as REG
@@ -222,7 +223,9 @@ def _missing_for(direction: int, st_entry, sm, ob, cfg) -> list:
 
 
 def _dynamic_sl(direction: int, price: float, st_entry, atr: float,
-                sm, reg, session: str) -> float:
+                sm, reg, session: str, symbol: str = "",
+                entry_df=None, digits: int = 5,
+                spread_multiple: float = 6.0) -> float:
     """Stop distance from structure and volatility, never a fixed number.
 
     The swing that would invalidate the idea sets the level; ATR sets the
@@ -246,20 +249,30 @@ def _dynamic_sl(direction: int, price: float, st_entry, atr: float,
 
     if dist <= 0:
         dist = atr * 1.5 * vol_mult
-    # bounded either side: too tight is spread food, too wide is not a plan
-    return max(atr * 0.9, min(atr * 4.0 * vol_mult, dist))
+    dist = max(atr * 0.9, min(atr * 4.0 * vol_mult, dist))
+    # "Too tight is spread food" was asserted here without the spread ever
+    # being known. Now it is estimated, and the floor is applied last so it
+    # beats the ATR ceiling - the same rule the signal engine follows.
+    if symbol and entry_df is not None:
+        floor, _ = COSTS.stop_floor(
+            symbol, entry_df, getattr(reg, "volatility", "normal"),
+            spread_multiple=spread_multiple, digits=digits)
+        dist = max(dist, floor)
+    return dist
 
 
 def _build_plan(direction: int, price: float, st_entry, sm, ob, atr: float,
                 reg, session: str, score: float, why: list, missing: list,
                 macro_dir: int, news_clear: bool, volume_ratio: float,
-                digits: int) -> Plan:
+                digits: int, symbol: str = "", entry_df=None,
+                spread_multiple: float = 6.0) -> Plan:
     """Turn one side's evidence into a costed plan."""
     side = BUY if direction > 0 else SELL
     plan = Plan(side=side, confidence=score, why=list(why),
                 waiting_for=list(missing))
 
-    sl_dist = _dynamic_sl(direction, price, st_entry, atr, sm, reg, session)
+    sl_dist = _dynamic_sl(direction, price, st_entry, atr, sm, reg, session,
+                          symbol, entry_df, digits, spread_multiple)
     if direction > 0:
         pool = (st_entry.last_high - price) if st_entry.last_high > price else 0.0
     else:
@@ -275,7 +288,7 @@ def _build_plan(direction: int, price: float, st_entry, sm, ob, atr: float,
         news_clear=news_clear, momentum=strength, style_cap=4.0)
 
     def r(x):
-        return round(x, digits)
+        return round(float(x), digits)
 
     # Entry zone: the order block when there is one. Without it, the zone
     # has to lean the way the trade does - a band centred on price gave
@@ -291,8 +304,11 @@ def _build_plan(direction: int, price: float, st_entry, sm, ob, atr: float,
     plan.entry_low, plan.entry_high = r(lo), r(hi)
     plan.entry = r((lo + hi) / 2)
     plan.sl = r(price - sl_dist if direction > 0 else price + sl_dist)
-    plan.tp = tuple(r(price + sl_dist * k if direction > 0 else price - sl_dist * k)
-                    for k in exit_plan.tp_r)
+    # spaced after rounding: three targets that round to one price is not
+    # a ladder, and that is exactly what a too-tight stop produced
+    plan.tp = COSTS.space_ladder(
+        price, [price + sl_dist * k * (1 if direction > 0 else -1)
+                for k in exit_plan.tp_r], direction, digits)
     plan.rr = exit_plan.tp_r[1]
     plan.win_probability = exit_plan.win_probability
     plan.expected_value = exit_plan.expected_value
@@ -433,11 +449,13 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
     rep.plan_buy = _build_plan(
         1, rep.price, st_entry, sm, sm.ob_bull, rep.atr, reg, session,
         rep.buy_score, buy_why, _missing_for(1, st_entry, sm, sm.ob_bull, cfg),
-        macro_dir, news_clear, volume_ratio, digits)
+        macro_dir, news_clear, volume_ratio, digits, symbol, entry_df,
+        getattr(cfg, "min_sl_spreads", 6.0))
     rep.plan_sell = _build_plan(
         -1, rep.price, st_entry, sm, sm.ob_bear, rep.atr, reg, session,
         rep.sell_score, sell_why, _missing_for(-1, st_entry, sm, sm.ob_bear, cfg),
-        macro_dir, news_clear, volume_ratio, digits)
+        macro_dir, news_clear, volume_ratio, digits, symbol, entry_df,
+        getattr(cfg, "min_sl_spreads", 6.0))
 
     # --- bias and the answer for right now ------------------------------
     gap = rep.buy_score - rep.sell_score
