@@ -84,6 +84,10 @@ class State:
     # Bangkok date of the last daily analysis, so the 06:00 report goes
     # out once a morning however many times the scan runs.
     last_daily_date: str = ""
+    # Which session's analysis went out last, as "YYYY-MM-DD#hour" - the
+    # report runs three times a day now, so the date alone cannot say
+    # whether the London one has been sent.
+    last_daily_slot: str = ""
     # Same idea for the 05:00 result review of the session that just closed.
     last_summary_date: str = ""
 
@@ -102,6 +106,7 @@ class State:
                    last_gold_scan_at=raw.get("last_gold_scan_at", ""),
                    macro=raw.get("macro", {}),
                    last_daily_date=raw.get("last_daily_date", ""),
+                   last_daily_slot=raw.get("last_daily_slot", ""),
                    last_summary_date=raw.get("last_summary_date", ""))
 
     def save(self, path: Path = STATE_FILE) -> None:
@@ -116,6 +121,7 @@ class State:
             "last_gold_scan_at": self.last_gold_scan_at,
             "macro": self.macro,
             "last_daily_date": self.last_daily_date,
+            "last_daily_slot": self.last_daily_slot,
             "last_summary_date": self.last_summary_date,
             "signals": [asdict(s) for s in keep],
         }

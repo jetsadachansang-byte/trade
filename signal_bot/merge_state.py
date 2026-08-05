@@ -24,7 +24,8 @@ from pathlib import Path
 # Dates and timestamps are ISO-8601, so a plain string comparison already
 # orders them correctly and the later one wins.
 FORWARD_ONLY = ("last_signal_at", "last_briefing_at", "last_gold_scan_at",
-                "last_daily_date", "last_summary_date", "updated")
+                "last_daily_date", "last_daily_slot",
+                "last_summary_date", "updated")
 
 
 def _progress(sig: dict) -> tuple:

@@ -243,6 +243,12 @@ def scan(state: State, tg: notifier.Telegram, cfg: Settings,
             continue
         gap = gold_gap if is_gold else pair_gap
         for prof in profiles:
+            # Spread makes a fast entry on the crosses a losing proposition
+            # before the trade even starts, so anything below the symbol's
+            # minimum entry timeframe is skipped outright. The smaller
+            # charts are still read - they just cannot be entered on.
+            if not cfg.entry_allowed(symbol, prof):
+                continue
             try:
                 frames = cache.frames(symbol, prof.timeframes())
             except market_data.DataError as exc:
@@ -409,9 +415,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"daily review sent: {rev.issued} issued, "
               f"{len(rev.closed)} closed, {rev.total_r:+.2f}R")
 
-    # --- Daily Market Analysis: one planning report each morning ------
-    if cfg.daily_report and (args.daily
-                             or daily_report.due(state, now, cfg.daily_report_hour)):
+    # --- Market Analysis: one planning report per trading session -----
+    # A plan drawn before Tokyo cannot explain a London breakout eight
+    # hours later, so the report runs once per session rather than once a
+    # day, and says which session it belongs to.
+    slot = daily_report.due(state, now, cfg.daily_report_hours)
+    if cfg.daily_report and args.daily and slot is None:
+        slot = (daily_report.slot_for(now, cfg.daily_report_hours)
+                or min(cfg.daily_report_hours or [6]))
+    if cfg.daily_report and slot is not None:
         reports = []
         for symbol in cfg.daily_symbols:
             try:
@@ -427,15 +439,18 @@ def main(argv: list[str] | None = None) -> int:
 
         risk = daily_report.risk_level([r for r in reports if not r.error], macro_view)
         tg.send(notifier.format_daily_overview(
-            macro_view, reports, risk, memory_bank.summary(state.signals)))
+            macro_view, reports, risk, memory_bank.summary(state.signals), slot))
         for rep in reports:
             tg.send(notifier.format_daily_symbol(rep))
         tg.send(notifier.format_daily_watchlist(reports, risk))
 
+        state.last_daily_slot = daily_report.slot_key(now, slot)
         state.last_daily_date = now.astimezone(
             daily_report.BANGKOK).date().isoformat()
         ok = sum(1 for r in reports if not r.error)
-        print(f"daily analysis sent for {ok}/{len(reports)} symbol(s)")
+        label = daily_report.SESSIONS.get(slot, ("", ""))[0]
+        print(f"market analysis ({label} {slot:02d}:00) sent for "
+              f"{ok}/{len(reports)} symbol(s)")
 
     # --- chart briefing: the running commentary on the market ---------
     gold = set(cfg.gold_symbols)

@@ -150,6 +150,21 @@ def _vote_block(con, show_reasons: bool = True) -> list:
     return out
 
 
+def _small_tf_line(cand) -> list:
+    """What the faster charts say - context on the ticket, never a gate.
+
+    Entries below H1 are reserved for gold because spread eats a fast trade
+    on the crosses, but the fast charts are still read for every symbol.
+    Showing them here is the difference between "not used" and "not looked
+    at", which are very different claims.
+    """
+    trends = getattr(cand, "analysis_trends", None)
+    if not trends:
+        return []
+    row = " · ".join(f"{tf}{_ARROW.get(t, '·')}" for tf, t in trends.items())
+    return [f"🔎 ไทม์เฟรมเล็ก (ใช้ดูจังหวะ ไม่ใช่จุดเข้า): {row}"]
+
+
 def format_signal(cand, signal_id: int, prof=None) -> str:
     """The full signal message."""
     arrow = "📈" if cand.direction > 0 else "📉"
@@ -175,6 +190,7 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
         f"· เกรด <b>{_esc(getattr(cand, 'grade', '-'))}</b>",
         f"💰 {_esc(_GRADE_ADVICE.get(getattr(cand, 'grade', ''), ''))}",
         f"⏱ ระยะเวลาถือที่คาด: {_esc(cand.hold_time or '-')}",
+        *_small_tf_line(cand),
         "━━━━━━━━━━━━━━",
         "🎯 <b>แผนออก (คำนวณใหม่ทุกครั้ง ไม่ใช่ค่าตายตัว)</b>",
         f"• รูปแบบ: <b>{_esc(getattr(cand, 'exit_label', '') or '-')}</b>"
@@ -788,14 +804,21 @@ def _plan_block(plan, symbol: str, title: str) -> list:
     return lines
 
 
-def format_daily_overview(macro_view, reports, risk, memory_line: str = "") -> str:
-    """Part one: what the world is pricing this morning."""
-    from .daily import BANGKOK
+def format_daily_overview(macro_view, reports, risk, memory_line: str = "",
+                          slot: int | None = None) -> str:
+    """Part one: what the world is pricing as this session takes over."""
+    from .daily import BANGKOK, SESSIONS
     stamp = datetime.now(timezone.utc).astimezone(BANGKOK).strftime("%d/%m/%Y")
-    lines = [f"📅 <b>บทวิเคราะห์ตลาดประจำวัน</b>",
-             f"<i>{stamp} · 06:00 น. (เวลาไทย)</i>",
-             "<i>รายงานเพื่อวางแผน ไม่ใช่สัญญาณเข้าออเดอร์ — "
-             "สัญญาณจะส่งแยกเมื่อเงื่อนไขครบ</i>", ""]
+    session_name, session_why = SESSIONS.get(slot, ("", ""))
+    title = (f"บทวิเคราะห์ตลาด รอบ{session_name}" if session_name
+             else "บทวิเคราะห์ตลาด")
+    when = f"{slot:02d}:00" if slot is not None else "—"
+    lines = [f"📅 <b>{title}</b>",
+             f"<i>{stamp} · {when} น. (เวลาไทย)</i>"]
+    if session_why:
+        lines.append(f"<i>{session_why}</i>")
+    lines += ["<i>รายงานเพื่อวางแผน ไม่ใช่สัญญาณเข้าออเดอร์ — "
+              "สัญญาณจะส่งแยกเมื่อเงื่อนไขครบ</i>", ""]
 
     # --- the tape ------------------------------------------------------
     if macro_view is not None and macro_view.available:
