@@ -80,7 +80,25 @@ class Settings:
 
     # --- trading styles ----------------------------------------------
     profiles: list[str] = field(default_factory=lambda: _env_names(
-        "PROFILES", "turbo,scalp,day,trend"))
+        "PROFILES", "turbo,scalp,day,intraday,trend"))
+
+    # --- ไทม์เฟรมต่ำสุดที่ "เข้าออเดอร์" ได้ ------------------------------
+    # สเปรดของคู่เงินบางคู่กินไม้สั้นหมดตั้งแต่ยังไม่ทันวิ่ง จึงห้ามเข้าต่ำ
+    # กว่า H1 ทองสเปรดแคบกว่ามากเมื่อเทียบกับระยะที่มันวิ่ง จึงเข้า M1 ได้
+    # ข้อจำกัดนี้คุมเฉพาะ "จุดเข้า" — ไทม์เฟรมเล็กยังถูกอ่านเพื่อวิเคราะห์อยู่
+    min_entry_tf: str = field(
+        default_factory=lambda: _env_str("MIN_ENTRY_TF", "H1").upper())
+    gold_min_entry_tf: str = field(
+        default_factory=lambda: _env_str("GOLD_MIN_ENTRY_TF", "M1").upper())
+
+    def min_entry_minutes(self, symbol: str) -> int:
+        """Smallest entry timeframe this symbol may trade, in minutes."""
+        from .profiles import TF_MINUTES
+        name = self.gold_min_entry_tf if self.is_gold(symbol) else self.min_entry_tf
+        return TF_MINUTES.get(name, 0)
+
+    def entry_allowed(self, symbol: str, prof) -> bool:
+        return prof.entry_minutes >= self.min_entry_minutes(symbol)
 
     # --- symbol universe (priority order matters) --------------------
     tier1: list[str] = field(default_factory=lambda: _env_list("TIER1_SYMBOLS", "XAUUSD"))
@@ -214,8 +232,11 @@ class Settings:
     # --- บทวิเคราะห์ตลาดรายวัน (Daily Market Analysis) ------------------
     daily_report: bool = field(default_factory=lambda: _env_bool("DAILY_REPORT", True))
     # ชั่วโมงตามเวลาไทย (Asia/Bangkok) ที่จะส่งบทวิเคราะห์
-    daily_report_hour: int = field(
-        default_factory=lambda: _env_int("DAILY_REPORT_HOUR", 6))
+    # ส่ง 3 รอบต่อวันตามเซสชั่นตลาด (เวลาไทย): เช้าก่อนลอนดอน · บ่ายลอนดอน
+    # เข้า · ค่ำนิวยอร์กเข้า แผนที่วางไว้ตอนเช้าใช้อธิบายเบรกตอนลอนดอนไม่ได้
+    daily_report_hours: list = field(default_factory=lambda: sorted(
+        {int(h) for h in _env_list("DAILY_REPORT_HOURS", "6,14,20")
+         if h.strip().isdigit() and 0 <= int(h) <= 23}))
     # --- สรุปผลรายวัน (Daily Result Review) ----------------------------
     # ส่งตอนตี 5 ก่อนบทวิเคราะห์ 1 ชม. เพราะรอบตลาดนิวยอร์กเพิ่งปิด
     daily_summary: bool = field(

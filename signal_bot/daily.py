@@ -101,16 +101,47 @@ class SymbolReport:
     error: str = ""
 
 
-def due(state, now: datetime, hour: int = 6) -> bool:
-    """Is today's report still owed?
+# One report per session, because a plan drawn before Tokyo has little to
+# say about a London breakout eight hours later. The hours are Bangkok
+# local and sit just before each session takes over, so the report lands
+# while there is still time to act on it.
+SESSIONS = {
+    6: ("เช้า", "ก่อนเปิดลอนดอน · สรุปสิ่งที่รอบเอเชียทำไว้และวางแผนทั้งวัน"),
+    14: ("บ่าย", "ช่วงลอนดอนเข้าตลาด · สภาพคล่องเข้าหนัก เทรนด์ของวันมักเกิดตรงนี้"),
+    20: ("ค่ำ", "ช่วงนิวยอร์กเข้าตลาด · คาบเกี่ยวกับลอนดอน ผันผวนสูงสุดของวัน"),
+}
 
-    Keyed on the Bangkok date so a run at 23:10 UTC and one at 00:10 UTC
-    are the same trading morning and only one report goes out.
+
+def slot_for(now: datetime, hours) -> int | None:
+    """The most recent report slot that has already come round today.
+
+    Only the latest one is returned. If the bot was down all morning and
+    wakes at 21:00 the market does not need three stale reports at once -
+    it needs the current one.
     """
     local = now.astimezone(BANGKOK)
-    if local.hour < hour:
-        return False
-    return getattr(state, "last_daily_date", "") != local.date().isoformat()
+    past = [h for h in sorted(hours) if local.hour >= h]
+    return past[-1] if past else None
+
+
+def slot_key(now: datetime, hour: int) -> str:
+    return f"{now.astimezone(BANGKOK).date().isoformat()}#{hour}"
+
+
+def due(state, now: datetime, hours=(6,)) -> int | None:
+    """Which report slot is still owed, if any.
+
+    Keyed on the Bangkok date *and* the slot, so however many times the
+    scan runs each session's report goes out exactly once.
+    """
+    if isinstance(hours, int):
+        hours = (hours,)
+    hour = slot_for(now, hours)
+    if hour is None:
+        return None
+    if getattr(state, "last_daily_slot", "") == slot_key(now, hour):
+        return None
+    return hour
 
 
 def _trend_word(structure) -> str:

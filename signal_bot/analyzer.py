@@ -68,6 +68,7 @@ class Candidate:
     invalidation: str = ""
     # --- Adaptive Multi-Strategy: who voted, and what they said -------
     consensus: object = None          # voters.Consensus, when voting is on
+    analysis_trends: dict = field(default_factory=dict)
     # --- Dynamic Exit Engine -----------------------------------------
     exit_mode: str = "fixed"
     exit_label: str = ""
@@ -143,6 +144,8 @@ class MarketView:
     regime_evidence: list = field(default_factory=list)
     strategies: list = field(default_factory=list)
     consensus: object = None          # voters.Consensus, when voting is on
+    # Timeframes read for context but never allowed to block an entry.
+    analysis_trends: dict = field(default_factory=dict)
 
 
 def _clamp(value: float) -> float:
@@ -390,6 +393,15 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     st_h1 = S.analyse_structure(h1_df, cfg.swing_bars, cfg.struct_lookback)
     st_entry = S.analyse_structure(entry_df, cfg.swing_bars, cfg.struct_lookback)
 
+    # The faster charts every symbol is read on, gate or no gate: an H1
+    # entry still wants to know what the five-minute chart is doing, it
+    # just must not be refused because of it.
+    for tf in prof.analysis_tfs:
+        small = frames.get(tf)
+        if small is not None and len(small) > 5:
+            view.analysis_trends[tf] = S.analyse_structure(
+                small, cfg.swing_bars, cfg.struct_lookback).trend
+
     view.trend_d1, view.trend_h4 = st_d1.trend, st_h4.trend
     view.trend_h1, view.trend_entry = st_h1.trend, st_entry.trend
     view.swing_high, view.swing_low = st_entry.last_high, st_entry.last_low
@@ -621,6 +633,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
         strategies=list(strategies), weights=dict(weights),
         strategy_why=strategy_why, macro_note=macro_why,
         memory_note=recall.note, consensus=consensus,
+        analysis_trends=dict(view.analysis_trends),
     )
 
     # --- LEVEL 6: the numbers come from the chosen exit plan ------------

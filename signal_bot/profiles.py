@@ -12,6 +12,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# Timeframes in minutes, so "at least H1" is a comparison rather than a
+# list of names every caller has to keep in the right order.
+TF_MINUTES = {"M1": 1, "M5": 5, "M15": 15, "M30": 30,
+              "H1": 60, "H4": 240, "D1": 1440, "W1": 10080}
+
 
 @dataclass(frozen=True)
 class Profile:
@@ -44,6 +49,11 @@ class Profile:
     require_mitigation: bool = True
 
     # --- lifecycle ------------------------------------------------------
+    # Lower timeframes read for the report but never used as a gate. A
+    # five-minute chart disagreeing with a multi-day position is normal,
+    # not a reason to refuse the trade - but it is worth showing.
+    analysis_tfs: tuple = ()
+
     expiry_hours: int = 12
     hold_time: str = ""            # expected holding time, shown in signals
     note: str = ""                 # style-specific advice in the message
@@ -63,10 +73,14 @@ class Profile:
     def is_long_hold(self) -> bool:
         return self.horizon == "long"
 
+    @property
+    def entry_minutes(self) -> int:
+        return TF_MINUTES.get(self.entry_tf, 0)
+
     def timeframes(self) -> list:
         """Every timeframe this profile needs loaded, de-duplicated."""
         wanted = [self.htf_major, self.htf_mid, self.htf_minor,
-                  *self.confirm_tfs, self.entry_tf]
+                  *self.confirm_tfs, *self.analysis_tfs, self.entry_tf]
         seen, out = set(), []
         for tf in wanted:
             if tf not in seen:
@@ -140,6 +154,7 @@ DAY = Profile(
     entry_tf="M15",
     htf_major="D1", htf_mid="H4", htf_minor="H1",
     confirm_tfs=("M30",),
+    analysis_tfs=("M5",),
     atr_mult_sl=1.5, min_sl_atr=0.8, max_sl_atr=2.5,
     tp_r=(1.0, 2.0, 3.0),
     score_threshold=90.0,
@@ -162,6 +177,7 @@ RUN_TREND = Profile(
     entry_tf="H1",
     htf_major="W1", htf_mid="D1", htf_minor="H4",
     confirm_tfs=("H1",),
+    analysis_tfs=("M15", "M5"),
     atr_mult_sl=2.0, min_sl_atr=1.0, max_sl_atr=3.5,
     tp_r=(2.0, 4.0, 6.0),
     score_threshold=88.0,
@@ -175,8 +191,40 @@ RUN_TREND = Profile(
     pace_weight=0.3,
 )
 
-ALL: dict = {p.name: p for p in (TURBO, SCALP, DAY, RUN_TREND)}
-DEFAULT_ORDER = ("turbo", "scalp", "day", "trend")
+# ----------------------------------------------------------------------
+# INTRADAY H1 - the styles pairs are actually allowed to enter on
+# ----------------------------------------------------------------------
+# Spreads on the crosses eat a scalp before it starts, so entries below H1
+# are reserved for gold. That left the pairs with nothing but multi-day
+# swings, which is a different trade from an intraday one and paced far too
+# slowly to carry a day. This is the intraday style rebuilt on an H1 entry:
+# same day-trade targets and holding time, read off the hourly chart rather
+# than the fifteen-minute one. The smaller charts are still read - they are
+# in analysis_tfs, reported but never used to block an entry.
+INTRADAY = Profile(
+    name="intraday",
+    label="Intraday H1",
+    emoji="🕐",
+    entry_tf="H1",
+    htf_major="D1", htf_mid="H4", htf_minor="H1",
+    confirm_tfs=("M15",),
+    analysis_tfs=("M5", "M1"),
+    atr_mult_sl=1.5, min_sl_atr=0.8, max_sl_atr=2.5,
+    tp_r=(1.0, 2.0, 3.0),
+    score_threshold=80.0,
+    min_ob_quality=55.0,
+    # an hourly chart shows a clean sweep far less often than a five-minute
+    # one; the structure break and the order block carry the setup here
+    require_sweep=False,
+    expiry_hours=24,
+    hold_time="4 – 24 ชั่วโมง",
+    note="เข้าที่ H1 — สเปรดกินน้อยกว่าไม้สั้น ตั้ง SL/TP ทันทีและเลื่อนเป็น BE ที่ TP1",
+    horizon="short",
+    pace_weight=1.0,
+)
+
+ALL: dict = {p.name: p for p in (TURBO, SCALP, DAY, INTRADAY, RUN_TREND)}
+DEFAULT_ORDER = ("turbo", "scalp", "day", "intraday", "trend")
 
 
 def resolve(names) -> list:
