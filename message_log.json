@@ -1,4 +1,27 @@
 {
-  "updated": "2026-08-06T14:30:50+00:00",
-  "messages": []
+  "updated": "2026-08-06T14:40:51+00:00",
+  "messages": [
+    {
+      "at": "2026-08-06T14:40:25+00:00",
+      "kind": "pulse",
+      "title": "📡 เช็คตลาด · 06/08 21:40 น. · Overlap",
+      "symbols": [
+        "XAUUSD",
+        "USDCAD",
+        "EURUSD",
+        "AUDUSD",
+        "EURGBP",
+        "CHFJPY",
+        "GBPUSD",
+        "USDJPY",
+        "USDCHF",
+        "NZDUSD",
+        "EURJPY",
+        "GBPJPY",
+        "AUDJPY",
+        "CADJPY"
+      ],
+      "text": "📡 เช็คตลาด · 06/08 21:40 น. · Overlap\n⚪ Mixed · DXY ▲+0.1% · US10Y ▲+0.5% · VIX ▲+0.4%\n📌 ไม้ที่ถืออยู่ 2 · ส่งวันนี้ 2\n\nPair          ราคา  ทาง ขั้น  สถานะ\nXAUUSD     4272.78    -  0/11  ไม่มีทาง\nUSDCAD     1.40136 SELL  7/11  กำลังก่อตัว\nEURUSD     1.15460  BUY  2/11  รอ\nAUDUSD     0.70403  BUY  2/11  รอ\nEURGBP     0.85776  BUY  2/11  รอ\nCHFJPY      195.21  BUY  2/11  รอ\nGBPUSD     1.34571    -  0/11  ไม่มีทาง\nUSDJPY      157.84    -  0/11  ไม่มีทาง\nUSDCHF     0.80857    -  0/11  ไม่มีทาง\nNZDUSD     0.58730    -  0/11  ไม่มีทาง\nEURJPY      182.21    -  0/11  ไม่มีทาง\nGBPJPY      212.42    -  0/11  ไม่มีทาง\nAUDJPY      111.09    -  0/11  ไม่มีทาง\nCADJPY      112.64    -  0/11  ไม่มีทาง\n⚪ ยัง"
+    }
+  ]
 }
