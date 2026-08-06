@@ -242,6 +242,12 @@ class Settings:
     # Status is sent only on request now (--status). It was a repository
     # variable, which meant one setting turned every scan into a message.
 
+    # --- เช็คชีพจรตลาด (Market Pulse) ------------------------------------
+    # ทุกกี่ชั่วโมงจะสรุปว่าตอนนี้แต่ละคู่เป็นยังไงและเข้าได้หรือยัง
+    # (0 = ปิด) ใช้ข้อมูลจากรอบสแกนที่ทำอยู่แล้ว จึงไม่กินโควตา API เพิ่ม
+    pulse_hours: float = field(
+        default_factory=lambda: _env_float("PULSE_HOURS", 3.0))
+
     # --- บทวิเคราะห์ตลาดรายวัน (Daily Market Analysis) ------------------
     daily_report: bool = field(default_factory=lambda: _env_bool("DAILY_REPORT", True))
     # ชั่วโมงตามเวลาไทย (Asia/Bangkok) ที่จะส่งบทวิเคราะห์

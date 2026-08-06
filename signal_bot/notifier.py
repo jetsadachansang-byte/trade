@@ -6,8 +6,6 @@ from datetime import datetime, timezone
 
 import requests
 
-from . import voters as VOTERS
-
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
@@ -448,4 +446,92 @@ def format_session_plans(reports) -> str:
             lines.append("⏳ ยังขาด: " + _esc(" · ".join(plan.waiting_for[:2])))
     lines += ["━━━━━━━━━━━━━━",
               "<i>ถึง TP1 ปิด 1/3 + เลื่อน SL มาจุดเข้า · เสี่ยงไม่เกิน 1% ต่อไม้</i>"]
+    return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------
+# Market pulse: where every pair stands right now, and whether it can be
+# entered. This costs nothing extra - the scan already produces a view of
+# every symbol on every run, it was just never sent anywhere. So the check
+# answers the question from the engine that actually issues signals rather
+# than from a second opinion computed for the report.
+# ----------------------------------------------------------------------
+
+# How far through the eleven-step pipeline a symbol got, in plain terms.
+def _pulse_verdict(steps: int) -> tuple:
+    if steps >= 11:
+        return "🟢", "เข้าได้"
+    if steps >= 8:
+        return "🟡", "ใกล้แล้ว"
+    if steps >= 4:
+        return "🟠", "กำลังก่อตัว"
+    if steps >= 1:
+        return "⚪", "รอ"
+    return "⚫", "ไม่มีทาง"
+
+
+def _best_view(group):
+    """The view that got furthest for one symbol, across its styles."""
+    return max(group, key=lambda v: (v.steps_passed, v.score))
+
+
+def format_pulse(views, macro_view=None, session: str = "", live: int = 0,
+                 today: int = 0) -> str:
+    """One message: what the market is doing and which pairs are enterable."""
+    from .daily import BANGKOK
+    stamp = datetime.now(timezone.utc).astimezone(BANGKOK).strftime("%d/%m %H:%M")
+    lines = [f"📡 <b>เช็คตลาด</b> · {stamp} น."
+             + (f" · {_esc(session)}" if session else " · นอกเวลาหลัก")]
+
+    if macro_view is not None and getattr(macro_view, "available", False):
+        icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(macro_view.risk, "⚪")
+        row = " · ".join(
+            f"{n} {'▲' if macro_view.changes[n] > 0 else '▼'}{macro_view.changes[n]:+.1f}%"
+            for n in ("DXY", "US10Y", "VIX") if n in macro_view.changes)
+        lines.append(f"{icon} <b>{_esc(macro_view.risk)}</b> · {row}")
+    else:
+        lines.append("⚪ <i>ภาพมหภาคดึงไม่ได้รอบนี้</i>")
+    lines.append(f"📌 ไม้ที่ถืออยู่ {live} · ส่งวันนี้ {today}")
+
+    by_symbol: dict = {}
+    for v in views:
+        by_symbol.setdefault(v.symbol, []).append(v)
+    if not by_symbol:
+        lines.append("⚠️ <i>ไม่มีข้อมูลคู่ไหนเลยรอบนี้ — ฟีดราคาน่าจะมีปัญหา</i>")
+        return "\n".join(lines)
+
+    best = {sym: _best_view(g) for sym, g in by_symbol.items()}
+    ready = [v for v in best.values() if v.steps_passed >= 11]
+    close = [v for v in best.values() if 8 <= v.steps_passed < 11]
+
+    rows = [f"{'Pair':<8}{'ราคา':>10}{'ทาง':>5}{'ขั้น':>5}  สถานะ"]
+    for sym, v in sorted(best.items(), key=lambda kv: -kv[1].steps_passed):
+        icon, word = _pulse_verdict(v.steps_passed)
+        side = "BUY" if v.direction > 0 else "SELL" if v.direction < 0 else "-"
+        rows.append(f"{sym:<8}{_fmt(v.price, sym):>10}{side:>5}"
+                    f"{v.steps_passed:>3}/11  {word}")
+    lines += ["", "<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>"]
+
+    # What is actually stopping the ones that are closest, and why.
+    watch = sorted(close, key=lambda v: -v.steps_passed)[:4]
+    if ready:
+        lines.append("🟢 <b>เข้าได้ตอนนี้:</b> "
+                     + ", ".join(f"{v.symbol} {'BUY' if v.direction > 0 else 'SELL'}"
+                                 for v in ready)
+                     + " <i>(ตั๋วเต็มส่งแยกแล้ว)</i>")
+    if watch:
+        lines.append("🟡 <b>ใกล้เข้าเงื่อนไข — ยังขาด:</b>")
+        for v in watch:
+            side = "BUY" if v.direction > 0 else "SELL" if v.direction < 0 else "?"
+            lines.append(f"• <b>{_esc(v.symbol)}</b> {side} "
+                         f"({_esc(v.regime or '-')}) — {_esc(v.waiting or '-')}")
+    if not ready and not watch:
+        lines.append("⚪ <i>ยังไม่มีคู่ไหนใกล้เข้าเงื่อนไข — "
+                     "ตลาดไม่เข้าทาง ไม่ใช่ระบบหยุดทำงาน</i>")
+
+    stale = [v.symbol for v in best.values() if v.data_stale]
+    if stale:
+        lines.append("⚠️ <i>ข้อมูลช้า: " + ", ".join(stale) + "</i>")
+    lines.append("<i>ขั้น n/11 = ผ่านด่านของไพป์ไลน์เข้าเทรดกี่ด่านแล้ว · "
+                 "รายงานสถานะ ไม่ใช่คำสั่งเข้า</i>")
     return "\n".join(lines)

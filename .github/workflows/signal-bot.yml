@@ -138,6 +138,7 @@ jobs:
           MIN_OB_QUALITY: ${{ vars.MIN_OB_QUALITY }}
           DAILY_REPORT: ${{ vars.DAILY_REPORT }}
           DAILY_REPORT_HOURS: ${{ vars.DAILY_REPORT_HOURS }}
+          PULSE_HOURS: ${{ vars.PULSE_HOURS }}
           DAILY_SUMMARY: ${{ vars.DAILY_SUMMARY }}
           DAILY_SUMMARY_HOUR: ${{ vars.DAILY_SUMMARY_HOUR }}
           MIN_ENTRY_TF: ${{ vars.MIN_ENTRY_TF }}

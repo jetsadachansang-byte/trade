@@ -436,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     in_kz = in_kill_zone(cfg, now)
 
     rejections, errors, views = [], [], []
+    scanned = False
     if not (market_open(now) or args.ignore_hours):
         print("market closed - no scan")
     elif not (in_kz or args.ignore_hours):
@@ -443,6 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     elif news_ctx is not None and news_ctx.blocking and not args.ignore_hours:
         print(f"news blackout: {news_ctx.blocking_reason} - no scan")
     else:
+        scanned = True
         rejections, errors, views = scan(
             state, tg, cfg, now, cache, news_ctx, session, in_kz,
             macro_view=macro_view, learned=learned)
@@ -501,6 +503,29 @@ def main(argv: list[str] | None = None) -> int:
         label = daily_report.SESSIONS.get(slot, ("", ""))[0]
         print(f"market analysis ({label} {slot:02d}:00) sent for "
               f"{ok}/{len(reports)} symbol(s)")
+
+    # --- Market pulse: where every pair stands, every few hours -------
+    # Costs nothing: the scan already built a view of every symbol this
+    # run, it was simply never sent anywhere. Skipped when a session
+    # report has just gone out, since that answers the same question in
+    # more detail and two messages a minute apart is noise.
+    pulse_due = (cfg.pulse_hours > 0
+                 and state.minutes_since_pulse(now) >= cfg.pulse_hours * 60)
+    # Sent whenever a scan actually ran, even if it produced nothing: an
+    # empty result means the feed is down, and going silent about that is
+    # exactly how a broken bot looks like a quiet market.
+    if pulse_due and scanned and slot is None:
+        tg.send(notifier.format_pulse(
+            views, macro_view, session, len(state.live()),
+            state.issued_today(now)))
+        state.last_pulse_at = now.isoformat(timespec="seconds")
+        ready = sum(1 for v in views if v.steps_passed >= 11)
+        print(f"pulse sent: {len({v.symbol for v in views})} symbol(s), "
+              f"{ready} ready to enter")
+    elif pulse_due and slot is not None:
+        # the session report covers it; move the clock on so the pulse does
+        # not fire again a minute later
+        state.last_pulse_at = now.isoformat(timespec="seconds")
 
     # The rolling chart briefing used to run on its own clock and was the
     # only thing left that could fire on a scan cadence. Reports now belong
