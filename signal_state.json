@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-06T13:40:53+00:00",
+  "updated": "2026-08-06T13:45:41+00:00",
   "last_signal_at": "2026-08-06T08:05:21+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
   "last_gold_scan_at": "2026-08-06T13:30:29+00:00",
@@ -451,9 +451,9 @@
       "bar_time": "2026-08-05 17:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-06 13:19:54+00:00",
-      "status": "ACTIVE",
-      "tp1_hit": false,
+      "checked_to": "2026-08-06 13:44:55+00:00",
+      "status": "TP1",
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
       "reasons": [
@@ -577,7 +577,7 @@
       "bar_time": "2026-08-06 08:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-06 13:20:23+00:00",
+      "checked_to": "2026-08-06 13:45:22+00:00",
       "status": "TP1",
       "tp1_hit": true,
       "tp2_hit": false,
