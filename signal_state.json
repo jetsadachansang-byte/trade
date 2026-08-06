@@ -1,8 +1,8 @@
 {
-  "updated": "2026-08-06T23:03:49+00:00",
+  "updated": "2026-08-06T23:04:41+00:00",
   "last_signal_at": "2026-08-06T15:05:30+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
-  "last_gold_scan_at": "2026-08-06T23:03:33+00:00",
+  "last_gold_scan_at": "2026-08-06T23:04:11+00:00",
   "macro": {
     "changes": {
       "DXY": 0.28,
@@ -11,7 +11,7 @@
       "SP500": -0.18,
       "NASDAQ": -0.06,
       "DOW": -0.85,
-      "OIL": 3.79,
+      "OIL": 3.83,
       "SILVER": -0.47,
       "BTC": -0.46
     },
@@ -22,9 +22,9 @@
       "SP500": 7709.96,
       "NASDAQ": 26348.3516,
       "DOW": 53885.1016,
-      "OIL": 78.07,
+      "OIL": 78.1,
       "SILVER": 61.81,
-      "BTC": 64301.0703
+      "BTC": 64302.7891
     },
     "risk": "Mixed",
     "risk_score": -4.5,
@@ -43,7 +43,7 @@
       "Liquidity จริง (order book / volume จริง) — ฟีดฟรีไม่มีให้"
     ],
     "errors": [],
-    "fetched_at": "2026-08-06T23:03:33+00:00"
+    "fetched_at": "2026-08-06T23:04:11+00:00"
   },
   "last_daily_date": "2026-08-07",
   "last_summary_date": "2026-08-07",
@@ -451,7 +451,7 @@
       "bar_time": "2026-08-05 17:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-06 23:02:56+00:00",
+      "checked_to": "2026-08-06 23:03:56+00:00",
       "status": "TP1",
       "tp1_hit": true,
       "tp2_hit": false,
@@ -640,7 +640,7 @@
       "bar_time": "2026-08-06 15:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-06 23:01:56+00:00",
+      "checked_to": "2026-08-06 23:03:56+00:00",
       "status": "TP1",
       "tp1_hit": true,
       "tp2_hit": false,
@@ -661,7 +661,7 @@
     }
   ],
   "last_daily_slot": "2026-08-07#06",
-  "last_pulse_at": "2026-08-06T23:03:33+00:00",
+  "last_pulse_at": "2026-08-06T23:04:11+00:00",
   "last_news_date": "2026-08-07",
   "last_update_id": 0
 }
