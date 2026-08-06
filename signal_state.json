@@ -1,8 +1,8 @@
 {
-  "updated": "2026-08-06T07:10:52+00:00",
+  "updated": "2026-08-06T07:15:48+00:00",
   "last_signal_at": "2026-08-06T01:20:25+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
-  "last_gold_scan_at": "2026-08-06T06:55:32+00:00",
+  "last_gold_scan_at": "2026-08-06T07:15:32+00:00",
   "macro": {
     "changes": {
       "DXY": -0.22,
@@ -451,7 +451,7 @@
       "bar_time": "2026-08-05 17:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-06 07:09:57+00:00",
+      "checked_to": "2026-08-06 07:14:57+00:00",
       "status": "ACTIVE",
       "tp1_hit": false,
       "tp2_hit": false,
