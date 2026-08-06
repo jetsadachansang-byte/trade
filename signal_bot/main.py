@@ -449,6 +449,26 @@ def main(argv: list[str] | None = None) -> int:
             state, tg, cfg, now, cache, news_ctx, session, in_kz,
             macro_view=macro_view, learned=learned)
 
+    # --- Today's economic calendar, once each morning ------------------
+    # Straight from the same Forex Factory feed the signal engine already
+    # reads, so the agenda and the no-trade windows cannot disagree with
+    # each other. Fetched on its own only when news scoring is switched
+    # off - the agenda was asked for explicitly and should not vanish
+    # because of an unrelated setting.
+    local_now = now.astimezone(daily_report.BANGKOK)
+    if (cfg.news_agenda and local_now.hour >= cfg.news_agenda_hour
+            and state.last_news_date != local_now.date().isoformat()):
+        if news_ctx is not None and news_ctx.available:
+            events, news_error = news_ctx.day_events, ""
+        else:
+            events, news_error = news_feed.agenda_for(now)
+        tg.send(notifier.format_news_agenda(
+            events, news_error, cfg.news_pre_min, cfg.news_post_min))
+        state.last_news_date = local_now.date().isoformat()
+        high = sum(1 for e in events if e.high)
+        print(f"news agenda sent: {len(events)} event(s), {high} high impact"
+              + (f" · error: {news_error[:60]}" if news_error else ""))
+
     # --- Daily Result Review: how yesterday's signals actually did ----
     # Sent before the planning report, so the morning reads in the order a
     # desk works: what happened, then what to do about it.
