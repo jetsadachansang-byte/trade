@@ -59,7 +59,16 @@ def _pick(a: dict, b: dict) -> dict:
 
 
 def merge(mine: dict, theirs: dict) -> dict:
-    """Combine two state documents without either one losing work."""
+    """Combine two documents without either one losing work.
+
+    The message archive goes through here too - the workflow merges both
+    files the same way - so it is routed to its own union rather than
+    being treated as a signal state that happens to have no signals.
+    """
+    if "messages" in mine or "messages" in theirs:
+        from .archive import merge as merge_archive
+        return merge_archive(mine, theirs)
+
     out = dict(theirs)
 
     for key in FORWARD_ONLY:
@@ -67,6 +76,11 @@ def merge(mine: dict, theirs: dict) -> dict:
     for key in SLOT_KEYS:
         out[key] = max(mine.get(key, "") or "", theirs.get(key, "") or "",
                        key=_slot_rank)
+
+    # The update offset only ever moves forward; taking the smaller one
+    # would answer the same search again on the next scan.
+    out["last_update_id"] = max(int(mine.get("last_update_id", 0) or 0),
+                                int(theirs.get("last_update_id", 0) or 0))
 
     # The macro snapshot is a cache; this run may have just refreshed it.
     if mine.get("macro"):

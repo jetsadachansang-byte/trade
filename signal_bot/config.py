@@ -242,6 +242,16 @@ class Settings:
     # Status is sent only on request now (--status). It was a repository
     # variable, which meant one setting turned every scan into a message.
 
+    # --- ค้นข้อความเก่าด้วยคีย์เวิร์ด ------------------------------------
+    # บอทเก็บข้อความที่ส่งไปแล้วไว้ พิมพ์คำค้นเข้ามาใน Telegram แล้วมันจะ
+    # ตอบกลับพร้อมข้อความที่ตรงคำนั้น (ตอบในรอบสแกนถัดไป)
+    message_archive: bool = field(
+        default_factory=lambda: _env_bool("MESSAGE_ARCHIVE", True))
+    archive_days: int = field(
+        default_factory=lambda: _env_int("ARCHIVE_DAYS", 30))
+    search_results: int = field(
+        default_factory=lambda: _env_int("SEARCH_RESULTS", 5))
+
     # --- ปฏิทินข่าววันนี้ (News Agenda) ----------------------------------
     # ส่งตอน 06:00 น. ทุกวัน ดึงจาก Forex Factory ตัวเดียวกับที่ระบบใช้อยู่
     news_agenda: bool = field(

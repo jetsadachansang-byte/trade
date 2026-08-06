@@ -12,10 +12,47 @@ API = "https://api.telegram.org/bot{token}/{method}"
 class Telegram:
     """Minimal Telegram Bot API client."""
 
-    def __init__(self, token: str, chat_id: str, dry_run: bool = False):
+    def __init__(self, token: str, chat_id: str, dry_run: bool = False,
+                 archive=None, now=None):
         self.token = token
         self.chat_id = chat_id
         self.dry_run = dry_run or not (token and chat_id)
+        # Archiving happens here rather than at each call site: a message
+        # type added later is then filed without anyone remembering to,
+        # which is how an archive quietly ends up incomplete.
+        self.archive = archive
+        self.now = now
+
+    def poll(self, offset: int = 0, limit: int = 20) -> tuple:
+        """(updates, next_offset) - text messages sent to the bot.
+
+        Only messages from the configured chat are returned. The bot never
+        acts on an instruction from anywhere else, and it does not act on
+        instructions at all - the text is treated as a search query and
+        nothing more.
+        """
+        if self.dry_run:
+            return [], offset
+        try:
+            resp = requests.get(
+                API.format(token=self.token, method="getUpdates"), timeout=20,
+                params={"offset": offset, "timeout": 0, "limit": limit,
+                        "allowed_updates": '["message"]'})
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:        # noqa: BLE001 - degraded, not fatal
+            print(f"poll: {exc}")
+            return [], offset
+
+        out, highest = [], offset
+        for update in payload.get("result", []):
+            highest = max(highest, int(update.get("update_id", 0)) + 1)
+            message = update.get("message") or {}
+            chat = str((message.get("chat") or {}).get("id", ""))
+            text = (message.get("text") or "").strip()
+            if text and chat == str(self.chat_id):
+                out.append(text)
+        return out, highest
 
     def send(self, text: str) -> bool:
         """Send a message, splitting it if Telegram would reject the length.
@@ -26,7 +63,11 @@ class Telegram:
         HTML tag is ever cut in half.
         """
         chunks = _split(text)
-        return all(self._send_one(part) for part in chunks)
+        sent = all(self._send_one(part) for part in chunks)
+        if sent and self.archive is not None:
+            from datetime import datetime as _dt
+            self.archive.add(text, self.now or _dt.now(timezone.utc))
+        return sent
 
     def _send_one(self, text: str) -> bool:
         """Send one HTML message. Prints instead of sending in dry-run mode."""
@@ -631,3 +672,50 @@ def format_news_agenda(events, error: str = "", pre_minutes: int = 45,
     lines.append("<i>ตัวเลข 'คาด' และ 'ครั้งก่อน' มาจากปฏิทินโดยตรง "
                  "ระบบไม่ได้พยากรณ์เอง</i>")
     return "\n".join(lines)
+
+
+def format_search(query: str, matches, total: int, kept_days: int = 30) -> str:
+    """Answer to a keyword typed into the chat."""
+    from .archive import THAI_KIND
+    from .daily import BANGKOK
+    if not matches:
+        return ("\n".join([
+            f"🔍 <b>ไม่พบข้อความที่มี “{_esc(query)}”</b>",
+            f"<i>ค้นจากข้อความที่บอทส่งย้อนหลัง {kept_days} วัน</i>",
+            "",
+            "ลองคำอื่น เช่น <code>ทอง</code> · <code>XAUUSD</code> · "
+            "<code>buy</code> · <code>ข่าว</code> · <code>สรุปผล</code>",
+            "พิมพ์หลายคำได้ = ต้องมีครบทุกคำ เช่น <code>ทอง buy</code>",
+        ]))
+
+    lines = [f"🔍 <b>“{_esc(query)}”</b> — พบ {total} รายการ"
+             + (f" · แสดง {len(matches)} ล่าสุด" if total > len(matches) else "")]
+    for e in matches:
+        when = e.when().astimezone(BANGKOK).strftime("%d/%m %H:%M")
+        kind = THAI_KIND.get(e.kind, e.kind)
+        lines += ["━━━━━━━━━━━━━━",
+                  f"🕘 <b>{when}</b> น. · {kind}"
+                  + (f" · {' '.join(e.symbols[:3])}" if e.symbols else ""),
+                  f"<i>{_esc(e.title)}</i>"]
+        snippet = _snippet(e.text, query)
+        if snippet:
+            lines.append(_esc(snippet))
+    lines.append("━━━━━━━━━━━━━━")
+    lines.append(f"<i>ค้นย้อนหลัง {kept_days} วัน · พิมพ์คำใหม่เพื่อค้นอีกครั้ง</i>")
+    return "\n".join(lines)
+
+
+def _snippet(text: str, query: str, width: int = 150) -> str:
+    """The part of the message the keyword actually appears in.
+
+    Showing the top of a long message would usually miss the reason it
+    matched, which makes the result look wrong even when it is right.
+    """
+    body = " ".join(text.split())
+    for word in query.lower().split():
+        at = body.lower().find(word)
+        if at >= 0:
+            start = max(0, at - width // 3)
+            end = min(len(body), start + width)
+            return ("…" if start else "") + body[start:end] + ("…" if end < len(body) else "")
+    return body[:width] + ("…" if len(body) > width else "")

@@ -22,6 +22,7 @@ from . import macro as macro_feed
 from . import memory as memory_bank
 from . import news as news_feed
 from . import notifier
+from . import archive as msg_archive
 from . import review as day_review
 from .analyzer import analyse
 from .config import Settings
@@ -387,8 +388,23 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     now = datetime.now(timezone.utc)
-    tg = notifier.Telegram(cfg.telegram_token, cfg.telegram_chat_id, args.dry_run)
+    archive = msg_archive.Archive.load() if cfg.message_archive else None
+    tg = notifier.Telegram(cfg.telegram_token, cfg.telegram_chat_id,
+                           args.dry_run, archive=archive, now=now)
     state = State.load()
+
+    # --- answer anything typed into the chat --------------------------
+    # Done before anything else so a search is answered on the run it was
+    # noticed, and against an archive that does not yet include this run's
+    # own messages - searching for what was just sent is not what was asked.
+    if archive is not None:
+        queries, next_offset = tg.poll(state.last_update_id)
+        state.last_update_id = next_offset
+        for query in queries[-3:]:          # a burst of typing is not a queue
+            matches, total = archive.search(query, cfg.search_results)
+            tg.send(notifier.format_search(query, matches, total,
+                                           cfg.archive_days))
+            print(f"search {query!r}: {total} match(es)")
 
     # tracking runs even outside kill zones - an open signal must be
     # followed to its conclusion whatever the hour
@@ -569,6 +585,8 @@ def main(argv: list[str] | None = None) -> int:
     # five-minute flood back.
 
     state.save()
+    if archive is not None:
+        archive.save(keep_days=cfg.archive_days)
 
     # Status goes out only when explicitly asked for. It used to honour a
     # repository variable, which meant one setting turned every scan into a
