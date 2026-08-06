@@ -98,6 +98,9 @@ class State:
     last_summary_date: str = ""
     # Bangkok date of the last news agenda, so it goes out once a morning.
     last_news_date: str = ""
+    # Telegram update id to resume from, so a search typed into the chat is
+    # answered exactly once rather than on every scan forever.
+    last_update_id: int = 0
 
     # --- persistence -------------------------------------------------
     @classmethod
@@ -117,7 +120,8 @@ class State:
                    last_daily_date=raw.get("last_daily_date", ""),
                    last_daily_slot=raw.get("last_daily_slot", ""),
                    last_summary_date=raw.get("last_summary_date", ""),
-                   last_news_date=raw.get("last_news_date", ""))
+                   last_news_date=raw.get("last_news_date", ""),
+                   last_update_id=int(raw.get("last_update_id", 0) or 0))
 
     def save(self, path: Path = STATE_FILE) -> None:
         # keep the file small: drop finished signals older than 30 days
@@ -135,6 +139,7 @@ class State:
             "last_daily_slot": self.last_daily_slot,
             "last_summary_date": self.last_summary_date,
             "last_news_date": self.last_news_date,
+            "last_update_id": self.last_update_id,
             "signals": [asdict(s) for s in keep],
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2),

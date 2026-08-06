@@ -141,6 +141,9 @@ jobs:
           PULSE_HOURS: ${{ vars.PULSE_HOURS }}
           NEWS_AGENDA: ${{ vars.NEWS_AGENDA }}
           NEWS_AGENDA_HOUR: ${{ vars.NEWS_AGENDA_HOUR }}
+          MESSAGE_ARCHIVE: ${{ vars.MESSAGE_ARCHIVE }}
+          ARCHIVE_DAYS: ${{ vars.ARCHIVE_DAYS }}
+          SEARCH_RESULTS: ${{ vars.SEARCH_RESULTS }}
           DAILY_SUMMARY: ${{ vars.DAILY_SUMMARY }}
           DAILY_SUMMARY_HOUR: ${{ vars.DAILY_SUMMARY_HOUR }}
           MIN_ENTRY_TF: ${{ vars.MIN_ENTRY_TF }}
@@ -180,7 +183,7 @@ jobs:
         # ระหว่างที่รอบนี้กำลังทำงาน การ cp ทับจะลบงานของรอบนั้นทิ้ง
         if: always()
         run: |
-          if [ -z "$(git status --porcelain signal_state.json)" ]; then
+          if [ -z "$(git status --porcelain signal_state.json message_log.json)" ]; then
             echo "ไม่มีการเปลี่ยนแปลงสถานะ"
             exit 0
           fi
@@ -188,6 +191,9 @@ jobs:
           git config user.name "capitalguard-bot"
           git config user.email "bot@users.noreply.github.com"
           cp signal_state.json "$RUNNER_TEMP/signal_state.json"
+          # `|| true`: the step runs under `bash -e`, so a false test as the
+          # last command of a line would abort the whole save
+          [ -f message_log.json ] && cp message_log.json "$RUNNER_TEMP/message_log.json" || true
 
           saved=0
           for attempt in 1 2 3; do
@@ -198,14 +204,19 @@ jobs:
             # would throw that away. See signal_bot/merge_state.py
             python -m signal_bot.merge_state \
               "$RUNNER_TEMP/signal_state.json" signal_state.json
+            if [ -f "$RUNNER_TEMP/message_log.json" ]; then
+              python -m signal_bot.merge_state \
+                "$RUNNER_TEMP/message_log.json" message_log.json
+            fi
 
-            if [ -z "$(git status --porcelain signal_state.json)" ]; then
+            if [ -z "$(git status --porcelain signal_state.json message_log.json)" ]; then
               echo "สถานะตรงกับ remote อยู่แล้ว"
               saved=1
               break
             fi
 
             git add signal_state.json
+            [ -f message_log.json ] && git add message_log.json || true
             git commit -m "chore: update signal state [skip ci]"
             if git push; then
               saved=1
