@@ -85,6 +85,7 @@ class State:
     last_signal_at: str = ""           # ISO-8601 UTC, "" when none yet
     last_briefing_at: str = ""         # ISO-8601 UTC of the last chart briefing
     last_gold_scan_at: str = ""        # gold runs on its own slower clock
+    last_pulse_at: str = ""            # last market-pulse check
     macro: dict = field(default_factory=dict)   # LEVEL 1 snapshot, refreshed hourly
     # Bangkok date of the last daily analysis, so the 06:00 report goes
     # out once a morning however many times the scan runs.
@@ -109,6 +110,7 @@ class State:
         return cls(signals=signals, last_signal_at=raw.get("last_signal_at", ""),
                    last_briefing_at=raw.get("last_briefing_at", ""),
                    last_gold_scan_at=raw.get("last_gold_scan_at", ""),
+                   last_pulse_at=raw.get("last_pulse_at", ""),
                    macro=raw.get("macro", {}),
                    last_daily_date=raw.get("last_daily_date", ""),
                    last_daily_slot=raw.get("last_daily_slot", ""),
@@ -124,6 +126,7 @@ class State:
             "last_signal_at": self.last_signal_at,
             "last_briefing_at": self.last_briefing_at,
             "last_gold_scan_at": self.last_gold_scan_at,
+            "last_pulse_at": self.last_pulse_at,
             "macro": self.macro,
             "last_daily_date": self.last_daily_date,
             "last_daily_slot": self.last_daily_slot,
@@ -185,6 +188,11 @@ class State:
             return float("inf")
         delta = now - datetime.fromisoformat(self.last_briefing_at)
         return delta.total_seconds() / 60.0
+
+    def minutes_since_pulse(self, now: datetime) -> float:
+        if not self.last_pulse_at:
+            return float("inf")
+        return (now - datetime.fromisoformat(self.last_pulse_at)).total_seconds() / 60.0
 
     def minutes_since_gold_scan(self, now: datetime) -> float:
         if not self.last_gold_scan_at:
