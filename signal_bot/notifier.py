@@ -545,3 +545,89 @@ def format_pulse(views, macro_view=None, session: str = "", live: int = 0,
     lines.append("<i>ขั้น n/11 = ผ่านด่านของไพป์ไลน์เข้าเทรดกี่ด่านแล้ว · "
                  "รายงานสถานะ ไม่ใช่คำสั่งเข้า</i>")
     return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------
+# The morning news agenda, straight from the Forex Factory calendar.
+# Times are Bangkok, because that is where the reader is; the feed
+# publishes UTC. Nothing here is forecast by the bot - the figures are the
+# calendar's own forecast and previous values, printed as they arrive.
+# ----------------------------------------------------------------------
+
+_IMPACT = {"high": ("🔴", "แรง"), "medium": ("🟠", "กลาง"), "low": ("🟡", "เบา")}
+
+# Which of the instruments we watch a currency actually moves.
+_TOUCHES = {
+    "USD": "XAUUSD · ทุกคู่ที่มี USD",
+    "EUR": "EURUSD · EURJPY · EURGBP",
+    "GBP": "GBPUSD · GBPJPY · EURGBP",
+    "JPY": "USDJPY · EURJPY · GBPJPY · AUDJPY · CADJPY · CHFJPY",
+    "CHF": "USDCHF · CHFJPY",
+    "AUD": "AUDUSD · AUDJPY",
+    "NZD": "NZDUSD",
+    "CAD": "USDCAD · CADJPY",
+}
+
+
+def format_news_agenda(events, error: str = "", pre_minutes: int = 45,
+                       post_minutes: int = 45) -> str:
+    """What the calendar has for today, and when not to be in the market."""
+    from .daily import BANGKOK
+    from .news import blackout_windows
+    # Date from the events themselves when there are any: a message sent
+    # either side of midnight must be headed with the day it describes,
+    # not with whatever the clock said as it went out.
+    when = (events[0].when.astimezone(BANGKOK) if events
+            else datetime.now(timezone.utc).astimezone(BANGKOK))
+    lines = [f"📰 <b>ข่าวเศรษฐกิจวันนี้</b> · {when.strftime('%d/%m/%Y')}",
+             "<i>เวลาไทย · ที่มา Forex Factory</i>"]
+
+    if error:
+        lines += ["", "⚠️ <b>ดึงปฏิทินข่าวไม่สำเร็จ</b>",
+                  f"<i>{_esc(error[:150])}</i>",
+                  "<i>วันนี้ระบบจะไม่ใช้ข่าวประกอบการตัดสินใจ และจะไม่เดาว่ามีข่าวอะไร "
+                  "— เช็คปฏิทินเองก่อนเข้าไม้</i>"]
+        return "\n".join(lines)
+
+    if not events:
+        lines += ["", "✅ <b>วันนี้ไม่มีข่าวของสกุลที่ระบบติดตาม</b>",
+                  "<i>ตลาดมักเดินตามเทคนิคมากกว่าปกติในวันแบบนี้</i>"]
+        return "\n".join(lines)
+
+    high = [e for e in events if e.high]
+    mid = [e for e in events if e.impact.lower() == "medium"]
+    lines.append(f"🔴 แรง {len(high)} · 🟠 กลาง {len(mid)} · รวม {len(events)} รายการ")
+
+    # Low-impact releases are noise on a phone; high and medium are the day.
+    shown = [e for e in events if e.impact.lower() in ("high", "medium")]
+    if shown:
+        lines.append("")
+    for e in shown:
+        icon, _ = _IMPACT.get(e.impact.lower(), ("⚪", ""))
+        local = e.when.astimezone(BANGKOK).strftime("%H:%M")
+        lines.append(f"{icon} <b>{local}</b> {e.currency} · {_esc(e.title)}")
+        detail = []
+        if e.forecast:
+            detail.append(f"คาด {_esc(e.forecast)}")
+        if e.previous:
+            detail.append(f"ครั้งก่อน {_esc(e.previous)}")
+        if detail:
+            lines.append("      " + " · ".join(detail))
+
+    windows = blackout_windows(events, pre_minutes, post_minutes)
+    if windows:
+        lines += ["", f"⛔ <b>ช่วงห้ามเข้าไม้</b> (±{pre_minutes} นาทีรอบข่าวแรง)"]
+        for start, end in windows:
+            lines.append(f"• {start.astimezone(BANGKOK).strftime('%H:%M')}"
+                         f" – {end.astimezone(BANGKOK).strftime('%H:%M')} น.")
+        lines.append("<i>ระบบจะไม่ส่งสัญญาณในช่วงนี้เอง — สเปรดกว้างและราคากระชาก</i>")
+
+    hit = sorted({e.currency for e in high})
+    if hit:
+        lines += ["", "🎯 <b>คู่ที่ต้องระวังเป็นพิเศษ</b>"]
+        for cur in hit:
+            lines.append(f"• <b>{cur}</b> → {_TOUCHES.get(cur, cur)}")
+
+    lines.append("<i>ตัวเลข 'คาด' และ 'ครั้งก่อน' มาจากปฏิทินโดยตรง "
+                 "ระบบไม่ได้พยากรณ์เอง</i>")
+    return "\n".join(lines)

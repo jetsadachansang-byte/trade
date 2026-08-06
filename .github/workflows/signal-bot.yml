@@ -139,6 +139,8 @@ jobs:
           DAILY_REPORT: ${{ vars.DAILY_REPORT }}
           DAILY_REPORT_HOURS: ${{ vars.DAILY_REPORT_HOURS }}
           PULSE_HOURS: ${{ vars.PULSE_HOURS }}
+          NEWS_AGENDA: ${{ vars.NEWS_AGENDA }}
+          NEWS_AGENDA_HOUR: ${{ vars.NEWS_AGENDA_HOUR }}
           DAILY_SUMMARY: ${{ vars.DAILY_SUMMARY }}
           DAILY_SUMMARY_HOUR: ${{ vars.DAILY_SUMMARY_HOUR }}
           MIN_ENTRY_TF: ${{ vars.MIN_ENTRY_TF }}

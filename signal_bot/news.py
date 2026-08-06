@@ -76,6 +76,11 @@ class NewsContext:
     sentiment: dict = field(default_factory=dict)  # currency -> bullish/bearish/neutral
     notes: list = field(default_factory=list)      # human-readable findings
     score: float = 50.0                            # 0-100 for the score engine
+    # Every watched release falling on the local trading day. The signal
+    # engine only ever needs the handful of events near right now, but the
+    # morning agenda needs the whole day, and it comes from the same fetch
+    # rather than a second request that could disagree with it.
+    day_events: list = field(default_factory=list)
 
     def verified(self) -> bool:
         """True only when real calendar data backed this context."""
@@ -194,6 +199,7 @@ def build(now: datetime, currencies: set, pre_minutes: int = 45,
         ctx.notes.append("ไม่สามารถยืนยันข้อมูลข่าวล่าสุดได้ — จะไม่ใช้ข่าวประกอบการตัดสินใจ")
         return ctx
 
+    ctx.day_events = day_agenda(events, now)
     relevant = [e for e in events if e.currency in currencies]
     tally: dict = {}
 
@@ -260,3 +266,48 @@ def currencies_for(symbols) -> set:
         out.add(symbol[:3])
         out.add(symbol[3:])
     return out & WATCHED
+
+
+# The trading day the agenda covers, in Bangkok terms - a release at 21:30
+# Bangkok is tonight's business, not tomorrow's, and a UTC day boundary
+# would file it under the wrong date for a reader in Thailand.
+BANGKOK = timezone(timedelta(hours=7))
+
+
+def day_agenda(events, now: datetime, tz=BANGKOK) -> list:
+    """Every watched release on the local calendar day of `now`, in order."""
+    today = now.astimezone(tz).date()
+    return sorted((e for e in events if e.when.astimezone(tz).date() == today),
+                  key=lambda e: e.when)
+
+
+def agenda_for(now: datetime, tz=BANGKOK) -> tuple:
+    """(events, error) for today, fetched on its own.
+
+    Used when the signal engine's news context is unavailable - the agenda
+    was asked for explicitly, so it should not go missing just because
+    news scoring happens to be switched off.
+    """
+    try:
+        return day_agenda(fetch(), now, tz), ""
+    except Exception as exc:            # noqa: BLE001 - degraded, not fatal
+        return [], str(exc)
+
+
+def blackout_windows(events, pre_minutes: int = 45,
+                     post_minutes: int = 45) -> list:
+    """Merged (start, end) windows around high-impact releases.
+
+    Two releases at the same minute - which is how payrolls arrive - are
+    one window, not two identical ones printed twice.
+    """
+    spans = sorted((e.when - timedelta(minutes=pre_minutes),
+                    e.when + timedelta(minutes=post_minutes))
+                   for e in events if e.high)
+    merged: list = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
