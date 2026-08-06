@@ -476,7 +476,7 @@ def _best_view(group):
 
 
 def format_pulse(views, macro_view=None, session: str = "", live: int = 0,
-                 today: int = 0) -> str:
+                 today: int = 0, primary=("XAUUSD",)) -> str:
     """One message: what the market is doing and which pairs are enterable."""
     from .daily import BANGKOK
     stamp = datetime.now(timezone.utc).astimezone(BANGKOK).strftime("%d/%m %H:%M")
@@ -499,13 +499,23 @@ def format_pulse(views, macro_view=None, session: str = "", live: int = 0,
     if not by_symbol:
         lines.append("⚠️ <i>ไม่มีข้อมูลคู่ไหนเลยรอบนี้ — ฟีดราคาน่าจะมีปัญหา</i>")
         return "\n".join(lines)
+    missing = [s for s in primary if s not in by_symbol]
+    if missing:
+        lines.append("⚠️ <i>ไม่มีข้อมูล " + ", ".join(missing)
+                     + " รอบนี้ — ฟีดของคู่นี้น่าจะมีปัญหา</i>")
 
     best = {sym: _best_view(g) for sym, g in by_symbol.items()}
     ready = [v for v in best.values() if v.steps_passed >= 11]
     close = [v for v in best.values() if 8 <= v.steps_passed < 11]
 
+    # Gold leads whatever its score: it is the primary instrument, and a
+    # table sorted purely by progress buries it on a quiet morning.
+    def order(item):
+        sym, v = item
+        return (sym not in primary, -v.steps_passed, -v.score)
+
     rows = [f"{'Pair':<8}{'ราคา':>10}{'ทาง':>5}{'ขั้น':>5}  สถานะ"]
-    for sym, v in sorted(best.items(), key=lambda kv: -kv[1].steps_passed):
+    for sym, v in sorted(best.items(), key=order):
         icon, word = _pulse_verdict(v.steps_passed)
         side = "BUY" if v.direction > 0 else "SELL" if v.direction < 0 else "-"
         rows.append(f"{sym:<8}{_fmt(v.price, sym):>10}{side:>5}"

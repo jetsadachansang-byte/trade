@@ -511,13 +511,28 @@ def main(argv: list[str] | None = None) -> int:
     # more detail and two messages a minute apart is noise.
     pulse_due = (cfg.pulse_hours > 0
                  and state.minutes_since_pulse(now) >= cfg.pulse_hours * 60)
+
+    # Gold runs on a fifteen-minute clock of its own to stay inside the
+    # Twelve Data request budget, so only one scan in three carries it. A
+    # three-hourly check landing on one of the other two would report every
+    # pair except the primary instrument. Hold the pulse back until a run
+    # that actually has gold in it - at most a fifteen-minute wait - unless
+    # it is so overdue that waiting costs more than the missing row, which
+    # is what a gold feed outage would look like.
+    gold_syms = set(cfg.gold_symbols)
+    gold_missing = bool(gold_syms) and not any(v.symbol in gold_syms for v in views)
+    pulse_overdue = (cfg.pulse_hours > 0 and state.minutes_since_pulse(now)
+                     >= cfg.pulse_hours * 90)          # 1.5x the interval
+    if pulse_due and scanned and gold_missing and not pulse_overdue:
+        print("pulse: deferred to the next run that includes gold")
+        pulse_due = False
     # Sent whenever a scan actually ran, even if it produced nothing: an
     # empty result means the feed is down, and going silent about that is
     # exactly how a broken bot looks like a quiet market.
     if pulse_due and scanned and slot is None:
         tg.send(notifier.format_pulse(
             views, macro_view, session, len(state.live()),
-            state.issued_today(now)))
+            state.issued_today(now), primary=tuple(cfg.gold_symbols)))
         state.last_pulse_at = now.isoformat(timespec="seconds")
         ready = sum(1 for v in views if v.steps_passed >= 11)
         print(f"pulse sent: {len({v.symbol for v in views})} symbol(s), "
