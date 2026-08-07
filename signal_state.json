@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-07T05:50:39+00:00",
+  "updated": "2026-08-07T05:55:38+00:00",
   "last_signal_at": "2026-08-06T15:05:30+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
   "last_gold_scan_at": "2026-08-07T05:45:26+00:00",
@@ -451,7 +451,7 @@
       "bar_time": "2026-08-05 17:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-07 05:49:53+00:00",
+      "checked_to": "2026-08-07 05:54:54+00:00",
       "status": "TP1",
       "tp1_hit": true,
       "tp2_hit": false,
@@ -640,7 +640,7 @@
       "bar_time": "2026-08-06 15:00:00+00:00",
       "closed_at": "",
       "close_reason": "",
-      "checked_to": "2026-08-07 05:49:53+00:00",
+      "checked_to": "2026-08-07 05:53:53+00:00",
       "status": "TP1",
       "tp1_hit": true,
       "tp2_hit": false,
@@ -663,5 +663,5 @@
   "last_daily_slot": "2026-08-07#06",
   "last_pulse_at": "2026-08-07T05:30:25+00:00",
   "last_news_date": "2026-08-07",
-  "last_update_id": 0
+  "last_update_id": 344825152
 }
