@@ -1,8 +1,8 @@
 {
-  "updated": "2026-08-07T21:50:40+00:00",
-  "last_signal_at": "2026-08-07T18:05:39+00:00",
+  "updated": "2026-08-07T21:55:51+00:00",
+  "last_signal_at": "2026-08-07T21:55:24+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
-  "last_gold_scan_at": "2026-08-07T21:35:22+00:00",
+  "last_gold_scan_at": "2026-08-07T21:55:24+00:00",
   "macro": {
     "changes": {
       "DXY": -0.35,
@@ -910,6 +910,70 @@
         "Premium Zone ✔ (rangePos 0.68) | OTE ✔",
         "ข่าว: ข่าวยังไม่ให้ทิศทางชัดกับคู่นี้"
       ]
+    },
+    {
+      "id": 1786139724,
+      "symbol": "XAUUSD",
+      "tier": 1,
+      "direction": 1,
+      "entry": 4342.27,
+      "entry_low": 4341.9,
+      "entry_high": 4342.64,
+      "sl": 4339.33,
+      "tp1": 4344.62,
+      "tp2": 4347.14,
+      "tp3": 4347.15,
+      "rr": 1.66,
+      "score": 73.2,
+      "timeframe": "M5",
+      "created": "2026-08-07T21:55:24+00:00",
+      "profile": "scalp",
+      "expiry_hours": 4,
+      "regime": "Liquidity Hunt",
+      "strategies": [
+        "ICT Liquidity Sweep",
+        "SMC",
+        "Wyckoff Spring"
+      ],
+      "scores": {
+        "smc": 62.5,
+        "liquidity": 100.0,
+        "trend": 75.0,
+        "ict": 70.0,
+        "volume": 35.0,
+        "indicator": 50.0,
+        "rr": 25.0,
+        "spread": 30.0,
+        "news": 100.0,
+        "macro": 50.0,
+        "consensus": 61.2
+      },
+      "win_probability": 56.5,
+      "expected_value": 0.14,
+      "exit_mode": "fixed",
+      "trail_distance": 0.0,
+      "trail_peak": 0.0,
+      "bar_time": "2026-08-08 07:45:00+00:00",
+      "closed_at": "",
+      "close_reason": "",
+      "checked_to": "2026-08-08 07:45:00+00:00",
+      "status": "ACTIVE",
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "reasons": [
+        "สภาพตลาด: Liquidity Hunt (มั่นใจ 46%)",
+        "กลยุทธ์ที่เลือกใช้: ICT Liquidity Sweep, SMC, Wyckoff Spring",
+        "มติเทคนิค: สนับสนุน 4/7 · สอดคล้อง 32% · ความมั่นใจ 61",
+        "Market Structure: H1:UP M30:SIDE M15:UP",
+        "BOS ✔",
+        "CHoCH ✔",
+        "Liquidity Sweep ✔",
+        "Order Block ✔ (คุณภาพ 70/100)",
+        "Fair Value Gap ✔",
+        "Discount Zone ✔ (rangePos 0.40)",
+        "ข่าว: ข่าวยังไม่ให้ทิศทางชัดกับทอง"
+      ]
     }
   ],
   "last_daily_slot": "2026-08-07#20",
@@ -918,5 +982,5 @@
   "last_update_id": 344825152,
   "last_status_at": "2026-08-07T21:45:20+00:00",
   "last_weekly_date": "",
-  "last_gold_outlook_at": "2026-08-07T20:40:42+00:00"
+  "last_gold_outlook_at": "2026-08-07T21:55:24+00:00"
 }
