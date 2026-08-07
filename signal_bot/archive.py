@@ -26,9 +26,11 @@ from pathlib import Path
 ARCHIVE_FILE = Path(__file__).resolve().parent.parent / "message_log.json"
 
 # Bounded on purpose: this lives in git, and an unbounded log would grow
-# the repository forever.
-MAX_ENTRIES = 200
-MAX_TEXT = 700
+# the repository forever. The ceiling was raised when the bot moved to a
+# per-pair analysis: at roughly fifty messages a day, two hundred entries
+# was four days of history behind a search advertised as thirty.
+MAX_ENTRIES = 500
+MAX_TEXT = 600
 
 _TAGS = re.compile(r"<[^>]+>")
 _SYMBOL = re.compile(r"\b(XAU(?:USD)?|[A-Z]{3}(?:USD|JPY|GBP|CHF|CAD|AUD|NZD))\b")
@@ -45,15 +47,18 @@ KINDS = (
     ("signal", ("สินทรัพย์:", "Scalp", "Day Trade", "Run Trend", "Intraday")),
     ("news", ("ข่าวเศรษฐกิจวันนี้",)),
     ("review", ("สรุปผลรอบ", "สรุปผลประจำวัน")),
+    ("outlook", ("บทวิเคราะห์แนวโน้ม",)),
     ("session", ("คู่ที่มีแผนรอบนี้", "รอบเช้า", "รอบบ่าย", "รอบค่ำ",
-                 "บทวิเคราะห์ตลาด")),
+                 "บทวิเคราะห์ตลาด", "บทวิเคราะห์รอบ")),
     ("pulse", ("เช็คตลาด",)),
+    ("status", ("สถานะแผนทั้งหมด",)),
 )
 
 THAI_KIND = {
     "signal": "สัญญาณเข้า", "tp": "ถึง TP", "sl": "โดน SL",
     "trail": "เลื่อน SL", "cancel": "ยกเลิก", "news": "ข่าว",
     "review": "สรุปผล", "session": "บทวิเคราะห์", "pulse": "เช็คตลาด",
+    "outlook": "วิเคราะห์แนวโน้ม", "status": "สถานะแผน",
     "other": "อื่น ๆ",
 }
 

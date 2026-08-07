@@ -273,10 +273,12 @@ class Settings:
         default_factory=lambda: _env_int("NEWS_AGENDA_HOUR", 6))
 
     # --- เช็คชีพจรตลาด (Market Pulse) ------------------------------------
-    # ทุกกี่ชั่วโมงจะสรุปว่าตอนนี้แต่ละคู่เป็นยังไงและเข้าได้หรือยัง
-    # (0 = ปิด) ใช้ข้อมูลจากรอบสแกนที่ทำอยู่แล้ว จึงไม่กินโควตา API เพิ่ม
+    # ตารางสรุปว่าแต่ละคู่เดินไปถึงขั้นไหนของไพป์ไลน์เข้าเทรด
+    # ปิดไว้ (0) เพราะบทวิเคราะห์แนวโน้มรายคู่ตอบคำถามเดียวกันแบบละเอียด
+    # กว่า — ส่งทั้งสองอย่างคือส่งเรื่องเดิมซ้ำสองรอบ เปิดกลับได้ด้วย
+    # PULSE_HOURS=3 ถ้าอยากได้ตารางสั้น ๆ ระหว่างรอบวิเคราะห์
     pulse_hours: float = field(
-        default_factory=lambda: _env_float("PULSE_HOURS", 3.0))
+        default_factory=lambda: _env_float("PULSE_HOURS", 0.0))
 
     # --- บทวิเคราะห์ตลาดรายวัน (Daily Market Analysis) ------------------
     daily_report: bool = field(default_factory=lambda: _env_bool("DAILY_REPORT", True))
@@ -296,6 +298,17 @@ class Settings:
     daily_symbols: list[str] = field(default_factory=lambda: _env_list(
         "DAILY_SYMBOLS",
         "XAUUSD,EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))
+
+    # --- บทวิเคราะห์แนวโน้มรายคู่ (Trend Outlook) -----------------------
+    # หนึ่งคู่ = หนึ่งข้อความ ครบทั้งเทรนด์ทุกทามเฟรม แนวรับแนวต้าน
+    # สถานการณ์จุดต่อจุด และข่าวที่กระทบคู่นั้น
+    outlook: bool = field(default_factory=lambda: _env_bool("OUTLOOK", True))
+    # ทองส่งทุกกี่ชั่วโมง (คู่อื่นส่งตามเซสชั่นตลาดใน DAILY_REPORT_HOURS)
+    outlook_gold_hours: float = field(
+        default_factory=lambda: _env_float("OUTLOOK_GOLD_HOURS", 1.0))
+    # ว่างไว้ = ใช้ทุกคู่ใน universe (tier1+tier2+tier3)
+    outlook_symbols: list[str] = field(
+        default_factory=lambda: _env_list("OUTLOOK_SYMBOLS", ""))
 
 
     # --- scoring weights ---------------------------------------------------
@@ -346,6 +359,17 @@ class Settings:
         for tier, symbols in ((1, self.tier1), (2, self.tier2), (3, self.tier3)):
             pairs.extend((sym, tier) for sym in symbols)
         return pairs
+
+    def outlook_universe(self) -> list[str]:
+        """Instruments the trend outlook covers, gold first.
+
+        Defaults to everything the scanner watches: "every pair" means
+        every pair, and a shorter hard-coded list is how the crosses ended
+        up analysed for entries but never reported on.
+        """
+        if self.outlook_symbols:
+            return list(self.outlook_symbols)
+        return [sym for sym, _ in self.universe()]
 
     def validate(self) -> list[str]:
         """Human-readable configuration problems, empty when all good."""

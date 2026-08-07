@@ -24,8 +24,9 @@ from pathlib import Path
 # Dates and timestamps are ISO-8601, so a plain string comparison already
 # orders them correctly and the later one wins.
 FORWARD_ONLY = ("last_signal_at", "last_gold_scan_at", "last_pulse_at",
-                "last_status_at", "last_daily_date", "last_summary_date",
-                "last_news_date", "last_weekly_date", "updated")
+                "last_status_at", "last_gold_outlook_at", "last_daily_date",
+                "last_summary_date", "last_news_date", "last_weekly_date",
+                "updated")
 
 # "YYYY-MM-DD#HH" markers are compared by date and hour, not as raw text.
 # Padding makes the plain string comparison correct today, but a marker

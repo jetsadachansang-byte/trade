@@ -911,3 +911,172 @@ def format_weekly(rev, memory_line: str = "") -> str:
         lines.append(f"📚 <i>{_esc(memory_line)}</i>")
     lines.append("<i>R คิดตามกฎจัดการไม้ของระบบ ไม่ใช่ผลจากบัญชีจริง</i>")
     return "\n".join(lines)
+
+
+# ----------------------------------------------------------------------
+# Trend Outlook - the full read on one instrument, one message per pair.
+# ----------------------------------------------------------------------
+_SYMBOL_ICON = {"XAUUSD": "🥇"}
+_VOL_TH = {"high": "สูง", "normal": "ปกติ", "low": "ต่ำ"}
+
+
+def _feed_error_th(text: str) -> str:
+    """What a data failure means, before the stack of URLs that proves it.
+
+    The raw error is a hundred characters of connection pool and query
+    string. It is still printed underneath - a reader who wants to know
+    which feed broke should be able to see it - but the first line has to
+    say what happened in words.
+    """
+    low = (text or "").lower()
+    if "429" in low or "quota" in low or "limit" in low:
+        return "ดึงราคาไม่ได้ — โควตา API ของรอบนี้เต็ม"
+    if "404" in low or "not found" in low:
+        return "ดึงราคาไม่ได้ — ฟีดไม่มีคู่นี้ให้"
+    if any(k in low for k in ("connection", "timeout", "timed out",
+                              "max retries", "proxy", "resolve")):
+        return "ดึงราคาไม่ได้ — ฟีดราคาไม่ตอบรอบนี้"
+    if "โครงสร้าง" in text or "atr" in low:
+        return "ข้อมูลไม่พอจะอ่านโครงสร้างของคู่นี้"
+    return "ดึงข้อมูลคู่นี้ไม่สำเร็จรอบนี้"
+
+
+def _num(value: float, digits: int) -> str:
+    """Prices with thousands separators - 3,395.00 reads faster than 3395.0."""
+    return f"{value:,.{digits}f}"
+
+
+def format_outlook(o, now=None) -> str:
+    """One instrument, one message: trend, levels, what-ifs, and news.
+
+    Deliberately built from flowing lines rather than monospace tables.
+    A table has to be measured against the narrowest phone that will ever
+    read it, and when it loses that bet the columns land under the wrong
+    headings. Text simply wraps, and a wrapped sentence is still a
+    sentence.
+    """
+    from .daily import BANGKOK
+    stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
+    icon = _SYMBOL_ICON.get(o.symbol, "💱")
+    lines = [f"{icon} <b>{_esc(o.symbol)} · บทวิเคราะห์แนวโน้ม</b>",
+             f"🕒 {stamp.strftime('%d/%m %H:%M')} น."]
+
+    if o.error:
+        lines.append(f"⚠️ <b>{_esc(_feed_error_th(o.error))}</b>")
+        lines.append(f"<i>{_esc(o.error[:120])}</i>")
+        lines.append("<i>ไม่มีข้อมูลพอจะวิเคราะห์รอบนี้ — "
+                     "ระบบไม่เดาแทน จะวิเคราะห์ใหม่รอบหน้า</i>")
+        return "\n".join(lines)
+
+    age = (f" · ช้า {o.price_age_min:.0f} นาที" if o.price_age_min >= 2 else "")
+    lines.append(f"💰 ราคา <b>{_num(o.price, o.digits)}</b> "
+                 f"<i>({_esc(o.quote_tf)}{age})</i>")
+
+    # --- the big picture ------------------------------------------------
+    lines += ["", "<b>━━ ภาพรวม ━━</b>", _esc(o.long_term), _esc(o.alignment)]
+    if o.regime:
+        vol = _VOL_TH.get(o.volatility, o.volatility)
+        lines.append(f"สภาพตลาด: <b>{_esc(o.regime)}</b> "
+                     f"(มั่นใจ {o.regime_confidence:.0f}%) · ความผันผวน{vol}")
+
+    # The plain answer first: everything below is the reasoning behind it.
+    v_icon = {"BUY": "🟢", "SELL": "🔴"}.get(o.verdict, "⚪")
+    v_word = {"BUY": "มีความได้เปรียบฝั่ง BUY",
+              "SELL": "มีความได้เปรียบฝั่ง SELL"}.get(
+                  o.verdict, "ยังไม่ควรเข้า รอให้ชัดก่อน")
+    why = f" — {_esc(o.verdict_why)}" if o.verdict_why else ""
+    lines.append(f"{v_icon} <b>ตอนนี้: {v_word}</b>{why}")
+
+    # --- every timeframe ------------------------------------------------
+    if o.reads:
+        lines += ["", "<b>━━ แนวโน้มรายทามเฟรม ━━</b>"]
+        for r in o.reads:
+            note = f" · {_esc(r.note)}" if r.note else ""
+            lines.append(f"{r.arrow} <b>{r.tf}</b> {r.word}{note}")
+
+    # --- levels, drawn the way a chart is: top down --------------------
+    lv = o.level_map
+    if lv is not None and (lv.above or lv.below):
+        lines += ["", "<b>━━ แนวรับแนวต้านสำคัญ ━━</b>"]
+        for n, level in reversed(list(enumerate(lv.above, start=1))):
+            lines.append(f"🔺 <b>ต้าน {n}</b> {_num(level.price, o.digits)} "
+                         f"{level.stars} · {_esc(level.why)}")
+        lines.append(f"▶️ <b>ราคาตอนนี้ {_num(o.price, o.digits)}</b>")
+        for n, level in enumerate(lv.below, start=1):
+            lines.append(f"🔻 <b>รับ {n}</b> {_num(level.price, o.digits)} "
+                         f"{level.stars} · {_esc(level.why)}")
+        lines.append("<i>★ ยิ่งมาก = ยิ่งมีเหตุผลหลายอย่างมาชนกันที่ราคานั้น</i>")
+
+    # --- point by point --------------------------------------------------
+    if o.scenarios:
+        lines += ["", "<b>━━ ถ้ากราฟไปถึงจุดนี้ ━━</b>"]
+        for sc in o.scenarios:
+            mark = " <i>(ทางที่เทรนด์หนุนอยู่)</i>" if sc.likely else ""
+            lines.append(f"{sc.icon} <b>{_esc(sc.trigger)}</b>{mark}")
+            lines.append(f"    ↳ {_esc(sc.outcome)}")
+    if o.range_note:
+        lines.append(f"📏 กรอบที่น่าจะแกว่ง {_esc(o.range_note)}")
+    if o.invalidation:
+        lines.append(f"🚫 {_esc(o.invalidation)}")
+
+    # --- which techniques actually agree ---------------------------------
+    lines += ["", "<b>━━ เทคนิคที่อ่านตรงกัน ━━</b>"]
+    if o.techniques_for:
+        lines.append("✅ หนุน: " + _esc(" · ".join(o.techniques_for)))
+    if o.techniques_against:
+        lines.append("❌ ค้าน: " + _esc(" · ".join(o.techniques_against)))
+    if not (o.techniques_for or o.techniques_against):
+        lines.append("➖ รอบนี้ยังไม่มีเทคนิคไหนชี้ชัดไปทางใดทางหนึ่ง")
+    lines.append(f"น้ำหนัก: ฝั่งซื้อ <b>{o.buy_score:.0f}</b> · "
+                 f"ฝั่งขาย <b>{o.sell_score:.0f}</b> (เต็ม 100)")
+
+    # --- news, never invented --------------------------------------------
+    lines += ["", "<b>━━ ข่าวที่มีผลกับคู่นี้ ━━</b>"]
+    if o.news_note:
+        lines.append(f"<i>{_esc(o.news_note)}</i>")
+    for e in o.events:
+        icon2, _ = _IMPACT.get(e.impact.lower(), ("⚪", ""))
+        local = e.when.astimezone(BANGKOK).strftime("%H:%M")
+        detail = []
+        if e.forecast:
+            detail.append(f"คาด {_esc(e.forecast)}")
+        if e.previous:
+            detail.append(f"ก่อนหน้า {_esc(e.previous)}")
+        tail = f" <i>({' · '.join(detail)})</i>" if detail else ""
+        lines.append(f"{icon2} <b>{local}</b> {e.currency} · "
+                     f"{_esc(e.title)}{tail}")
+
+    lines += ["", "⚠️ <i>บทวิเคราะห์เพื่อวางแผน ไม่ใช่คำสั่งเข้า · "
+              "จุดเข้าจริงระบบส่งแยกเมื่อเงื่อนไขครบทุกข้อ</i>"]
+    return "\n".join(lines)
+
+
+def format_outlook_header(session_name: str, slot: int, symbols,
+                          macro_view=None, now=None) -> str:
+    """The banner that opens a session's run of per-pair analyses.
+
+    One line saying what is about to arrive and how the world looks, so a
+    reader scrolling into fourteen messages knows what they are and can
+    stop reading after the pairs they care about.
+    """
+    from .daily import BANGKOK, SESSIONS
+    stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
+    why = SESSIONS.get(slot, ("", ""))[1]
+    lines = [f"📊 <b>บทวิเคราะห์รอบ{session_name} {slot:02d}:00 น.</b> · "
+             f"{stamp.strftime('%d/%m/%Y')}"]
+    if why:
+        lines.append(f"<i>{_esc(why)}</i>")
+
+    if macro_view is not None and getattr(macro_view, "available", False):
+        icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(macro_view.risk, "⚪")
+        row = " · ".join(
+            f"{n} {'▲' if macro_view.changes[n] > 0 else '▼'}{macro_view.changes[n]:+.1f}%"
+            for n in ("DXY", "US10Y", "VIX") if n in macro_view.changes)
+        lines.append(f"{icon} ภาพรวมตลาด: <b>{_esc(macro_view.risk)}</b>"
+                     + (f" · {row}" if row else ""))
+    else:
+        lines.append("⚪ <i>ภาพมหภาครอบนี้ดึงไม่ได้ — ไม่นำมาใช้เป็นเหตุผล</i>")
+
+    lines.append(f"📨 กำลังส่งบทวิเคราะห์ <b>{len(list(symbols))}</b> คู่ "
+                 "<i>(คู่ละ 1 ข้อความ)</i>")
+    return "\n".join(lines)
