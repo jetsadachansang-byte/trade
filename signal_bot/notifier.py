@@ -262,42 +262,75 @@ def format_signal(cand, signal_id: int, prof=None) -> str:
     return "\n".join(lines)
 
 
-def format_tp(symbol: str, side: str, level: int, price: float,
-              signal_id: int) -> str:
-    """TP1/TP2/TP3 hit notification."""
+def _plan_lines(sig, reached: int = 0) -> list:
+    """The whole plan, with a mark against the levels already taken.
+
+    A tracking alert used to carry only the level that had just been hit,
+    which is the one number the reader can see on their own screen. What
+    they cannot see from the alert is where the rest of the plan sits -
+    and "move the stop to break-even" is not actionable without the entry
+    price in front of them.
+    """
+    sym = sig.symbol
+    rows = [f"{'Entry':<6}{_fmt(sig.entry, sym):>10}",
+            f"{'SL':<6}{_fmt(sig.sl, sym):>10}"]
+    for level, price, hit in ((1, sig.tp1, sig.tp1_hit),
+                              (2, sig.tp2, sig.tp2_hit),
+                              (3, sig.tp3, sig.tp3_hit)):
+        mark = "  <-- ถึงแล้ว" if hit or level <= reached else ""
+        rows.append(f"TP{level}{'':<3}{_fmt(price, sym):>10}{mark}")
+    return ["<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>"]
+
+
+def format_tp(sig, level: int, price: float) -> str:
+    """TP1/TP2/TP3 hit, with the rest of the plan alongside it."""
     if level == 1:
-        head = "✅ <b>TP1 Hit</b> (1R)"
-        hint = "💡 แนะนำ: ปิดบางส่วน + เลื่อน SL มาจุดเข้า (Break Even)"
+        head = "✅ <b>TP1 Hit</b>"
+        hint = ("💡 ปิดบางส่วน + เลื่อน SL มาที่ "
+                f"<b>{_fmt(sig.entry, sig.symbol)}</b> (จุดเข้า)")
     elif level == 2:
-        head = "✅ <b>TP2 Hit</b> (2R)"
-        hint = "💡 แนะนำ: ปิดเพิ่ม หรือเลื่อน SL ตามกำไร"
+        head = "✅ <b>TP2 Hit</b>"
+        hint = "💡 ปิดเพิ่ม หรือเลื่อน SL ตามกำไร"
     else:
-        head = "🎯 <b>TP3 Hit</b> (3R) — สัญญาณจบสมบูรณ์"
+        head = "🎯 <b>TP3 Hit</b> — สัญญาณจบสมบูรณ์"
         hint = "💡 ปิดไม้ที่เหลือทั้งหมด"
-    return (f"{head}\n{_esc(symbol)} {side} @ <b>{price}</b>\n{hint}\n"
-            f"🆔 Signal ID: {signal_id}")
+    lines = [f"{head} @ <b>{_fmt(price, sig.symbol)}</b>",
+             f"📊 <b>{_esc(sig.symbol)} {sig.side}</b>"]
+    lines += _plan_lines(sig, reached=level)
+    lines += [hint, f"🆔 {sig.id}"]
+    return "\n".join(lines)
 
 
-def format_trail(symbol: str, side: str, old_sl: float, new_sl: float,
-                 signal_id: int) -> str:
+def format_trail(sig, old_sl: float, new_sl: float) -> str:
     """The stop moved up behind the trade."""
-    return (f"🔒 <b>เลื่อน Stop Loss ตามกำไร</b>\n"
-            f"{_esc(symbol)} {side}\n"
-            f"SL: {old_sl} → <b>{new_sl}</b>\n"
-            f"💡 ล็อกกำไรไว้แล้ว ปล่อยไม้ที่เหลือวิ่งต่อ\n"
-            f"🆔 Signal ID: {signal_id}")
+    return "\n".join([
+        "🔒 <b>เลื่อน Stop Loss ตามกำไร</b>",
+        f"📊 <b>{_esc(sig.symbol)} {sig.side}</b>",
+        f"SL: {_fmt(old_sl, sig.symbol)} → <b>{_fmt(new_sl, sig.symbol)}</b>",
+        *_plan_lines(sig),
+        "💡 ล็อกกำไรไว้แล้ว ปล่อยไม้ที่เหลือวิ่งต่อ",
+        f"🆔 {sig.id}",
+    ])
 
 
-def format_sl(symbol: str, side: str, price: float, signal_id: int) -> str:
-    return (f"🛑 <b>Stop Loss Hit</b>\n{_esc(symbol)} {side} @ <b>{price}</b>\n"
-            f"🆔 Signal ID: {signal_id}")
+def format_sl(sig, price: float) -> str:
+    return "\n".join([
+        f"🛑 <b>Stop Loss Hit</b> @ <b>{_fmt(price, sig.symbol)}</b>",
+        f"📊 <b>{_esc(sig.symbol)} {sig.side}</b>",
+        *_plan_lines(sig),
+        f"🆔 {sig.id}",
+    ])
 
 
-def format_cancel(symbol: str, side: str, reason: str, signal_id: int) -> str:
-    return (f"❌ <b>Signal Cancelled</b>\n{_esc(symbol)} {side}\n"
-            f"เหตุผล: {_esc(reason)}\n"
-            f"💡 ถ้ายังไม่เข้า = ไม่ต้องเข้าแล้ว / ถ้าเข้าแล้ว = พิจารณาปิดก่อนถึง SL\n"
-            f"🆔 Signal ID: {signal_id}")
+def format_cancel(sig, reason: str) -> str:
+    return "\n".join([
+        "❌ <b>Signal Cancelled</b>",
+        f"📊 <b>{_esc(sig.symbol)} {sig.side}</b>",
+        *_plan_lines(sig),
+        f"เหตุผล: {_esc(reason)}",
+        "💡 ถ้ายังไม่เข้า = ไม่ต้องเข้าแล้ว / ถ้าเข้าแล้ว = พิจารณาปิดก่อนถึง SL",
+        f"🆔 {sig.id}",
+    ])
 
 
 def format_status(rejections, active: int, today: int, errors) -> str:
@@ -727,7 +760,12 @@ def _snippet(text: str, query: str, width: int = 150) -> str:
 
 
 def format_plan_status(board, now=None) -> str:
-    """Where every plan stands. Status only - no reasoning, by request."""
+    """Where every plan stands, with the plan itself alongside the status.
+
+    The status alone ("reached TP2") is only half an answer: acting on it
+    means knowing where TP3 and the stop actually are, and those are on a
+    ticket sent hours ago. So each row carries its own levels.
+    """
     from .daily import BANGKOK
     from .review import stage_of
     stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
@@ -739,23 +777,28 @@ def format_plan_status(board, now=None) -> str:
         lines.append("<i>ยังไม่มีแผนที่เปิดอยู่หรือปิดใน 24 ชม.ที่ผ่านมา</i>")
         return "\n".join(lines)
 
-    def block(title, rows, extra=None):
-        if not rows:
-            return []
-        out = ["", f"<b>{title} ({len(rows)})</b>"]
-        body = []
-        for sig in rows:
-            # _fmt, not the raw float: Python prints 1.085 for a price that
-            # is quoted 1.08500, and a price that does not look like a price
-            # is the kind of detail that makes a reader doubt the rest.
-            line = f"{sig.symbol:<8}{sig.side:<5}{_fmt(sig.entry, sig.symbol):>10}"
-            if extra:
-                line += f"  {extra(sig)}"
-            body.append(line)
-        out.append("<pre>" + "\n".join(html.escape(b) for b in body) + "</pre>")
-        return out
+    def rows_for(sigs, with_stage: bool):
+        # ASCII header: Thai glyphs do not hold a monospace column on mobile
+        rows = [f"{'Pair':<8}{'':<5}{'Entry':>9}{'SL':>10}"
+                f"{'TP1':>10}{'TP2':>10}{'TP3':>10}"]
+        for g in sigs:
+            sym = g.symbol
+            rows.append(f"{sym:<8}{g.side:<5}"
+                        f"{_fmt(g.entry, sym):>9}{_fmt(g.sl, sym):>10}"
+                        f"{_fmt(g.tp1, sym):>10}{_fmt(g.tp2, sym):>10}"
+                        f"{_fmt(g.tp3, sym):>10}")
+            if with_stage:
+                rows.append(f"{'':<13}▸ {stage_of(g)}")
+        return rows
 
-    lines += block("🟢 กำลังดำเนินการ", board.running, stage_of)
+    def block(title, sigs, with_stage=False):
+        if not sigs:
+            return []
+        body = rows_for(sigs, with_stage)
+        return ["", f"<b>{title} ({len(sigs)})</b>",
+                "<pre>" + "\n".join(html.escape(b) for b in body) + "</pre>"]
+
+    lines += block("🟢 กำลังดำเนินการ", board.running, with_stage=True)
     lines += block("✅ ครบ TP3", board.won)
     lines += block("🔴 โดน SL", board.lost)
     lines += block("⚪ ยกเลิก", board.cancelled)

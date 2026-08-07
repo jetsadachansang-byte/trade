@@ -117,7 +117,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
             if (is_buy and low <= sig.sl) or (not is_buy and high >= sig.sl):
                 sig.status = SL_HIT
                 _close(sig, now, "โดน SL")
-                tg.send(notifier.format_sl(sig.symbol, sig.side, sig.sl, sig.id))
+                tg.send(notifier.format_sl(sig, sig.sl))
                 break
 
             # --- trailing stop: move the stop up behind the move -------
@@ -131,8 +131,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
                 # never widen a stop, and never trail backwards
                 if (is_buy and moved > sig.sl) or (not is_buy and moved < sig.sl):
                     old_sl, sig.sl = sig.sl, round(float(moved), 5)
-                    tg.send(notifier.format_trail(sig.symbol, sig.side, old_sl,
-                                                  sig.sl, sig.id))
+                    tg.send(notifier.format_trail(sig, old_sl, sig.sl))
 
             # --- take profits, announced once each, in order -----------
             for level, target, already in (
@@ -151,8 +150,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
                 else:
                     sig.tp3_hit, sig.status = True, TP3
                     _close(sig, now, "ถึง TP3 ครบแผน")
-                tg.send(notifier.format_tp(sig.symbol, sig.side, level,
-                                           target, sig.id))
+                tg.send(notifier.format_tp(sig, level, target))
 
         # --- expiry: never reached TP1 within the window ---------------
         if sig.status == ACTIVE:
@@ -162,8 +160,7 @@ def track_open_signals(state: State, tg: notifier.Telegram,
                 sig.status = CANCELLED
                 _close(sig, now, f"หมดเวลา {expiry} ชม. โดยไม่ถึง TP1")
                 tg.send(notifier.format_cancel(
-                    sig.symbol, sig.side,
-                    f"เกินเวลา {expiry} ชม. โดยไม่ถึง TP1", sig.id))
+                    sig, f"เกินเวลา {expiry} ชม. โดยไม่ถึง TP1"))
 
 
 def _bars_since(df, checked_to: str):
