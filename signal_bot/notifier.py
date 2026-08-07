@@ -271,15 +271,53 @@ def _plan_lines(sig, reached: int = 0) -> list:
     and "move the stop to break-even" is not actionable without the entry
     price in front of them.
     """
+    return ["<pre>" + "\n".join(html.escape(r) for r in _plan_rows(sig, reached))
+            + "</pre>"]
+
+
+def _plan_rows(sig, reached: int = 0) -> list:
+    """The plan as one labelled number per line.
+
+    One number per line is the only shape that survives a narrow screen:
+    the label sits next to the price it belongs to, so nothing depends on
+    a column heading that may have wrapped away from it.
+    """
     sym = sig.symbol
-    rows = [f"{'Entry':<6}{_fmt(sig.entry, sym):>10}",
-            f"{'SL':<6}{_fmt(sig.sl, sym):>10}"]
+    rows = [f"{'Entry':<6}{_fmt(sig.entry, sym):>9}",
+            f"{'SL':<6}{_fmt(sig.sl, sym):>9}"]
     for level, price, hit in ((1, sig.tp1, sig.tp1_hit),
                               (2, sig.tp2, sig.tp2_hit),
                               (3, sig.tp3, sig.tp3_hit)):
-        mark = "  <-- ถึงแล้ว" if hit or level <= reached else ""
-        rows.append(f"TP{level}{'':<3}{_fmt(price, sym):>10}{mark}")
-    return ["<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>"]
+        mark = "  ถึงแล้ว" if hit or level <= reached else ""
+        rows.append(f"{'TP' + str(level):<6}{_fmt(price, sym):>9}{mark}")
+    return rows
+
+
+def _outcome_tag(sig) -> str:
+    """Where a finished plan ended, short enough to live in a table cell."""
+    if sig.tp3_hit:
+        return "TP3"
+    if getattr(sig, "status", "") == "SL_HIT":
+        return "SL·TP2" if sig.tp2_hit else "SL·TP1" if sig.tp1_hit else "SL"
+    if getattr(sig, "status", "") == "CANCELLED":
+        return "ยกเลิก"
+    if sig.tp2_hit:
+        return "TP2"
+    if sig.tp1_hit:
+        return "TP1"
+    return "-"
+
+
+# Regime names run to sixteen characters, which pushes the overview table
+# past what a phone holds. These are the same names, abbreviated.
+_REGIME_SHORT = {
+    "Strong Bull": "S.Bull", "Weak Bull": "W.Bull",
+    "Strong Bear": "S.Bear", "Weak Bear": "W.Bear",
+    "Range": "Range", "Compression": "Squeeze", "Expansion": "Expand",
+    "Liquidity Hunt": "LiqHunt", "Trend Exhaustion": "Exhaust",
+    "Mean Reversion": "MeanRev", "True Breakout": "Brk.OK",
+    "False Breakout": "Brk.Fake", "News Driven": "News",
+}
 
 
 def format_tp(sig, level: int, price: float) -> str:
@@ -371,6 +409,14 @@ def _fmt(value: float, symbol: str) -> str:
     return f"{value:.{digits}f}"
 
 
+# A phone fits roughly this many monospace characters inside a <pre> block.
+# Past it Telegram wraps the line, and the wrapped half lands under the
+# wrong heading - which is how a seven-column plan table turned into three
+# ragged lines of numbers with no labels near them. Every table below is
+# built to stay inside this, and any new one must be measured against it.
+LINE_BUDGET = 34
+
+
 TF_ORDER = ("M1", "M5", "M15", "H1", "H4", "D1")
 # the long-hold style never reads anything below H1, so listing M1-M15 here
 # would only print empty cells
@@ -409,10 +455,13 @@ def format_daily_review(rev) -> str:
         + (f" · ⏳ ถืออยู่ {len(rev.still_open)}" if rev.still_open else ""),
         "",
     ]
-    rows = [f"{'Pair':<8}{'Side':>5}{'R':>8}  ผล"]
+    # The full Thai outcome ("โดน SL หลัง TP1 (เสมอตัว/กำไรเล็กน้อย)") is
+    # wider than a phone can hold, and a wrapped row puts the next pair's
+    # name under the R column. The tag says the same thing in one cell.
+    rows = [f"{'Pair':<8}{'Side':<5}{'R':>7}  จบที่"]
     for out in sorted(rev.closed, key=lambda o: -o.result_r):
-        rows.append(f"{out.signal.symbol:<8}{out.signal.side:>5}"
-                    f"{out.result_r:>+8.2f}  {out.label[:22]}")
+        rows.append(f"{out.signal.symbol:<8}{out.signal.side:<5}"
+                    f"{out.result_r:>+7.2f}  {_outcome_tag(out.signal)}")
     lines.append("<pre>" + "\n".join(html.escape(x) for x in rows) + "</pre>")
 
     if rev.still_open:
@@ -484,10 +533,11 @@ def format_session_overview(macro_view, reports, risk, slot, counts=None) -> str
         lines.append(f"📨 สัญญาณวันนี้: {quota}")
 
     ok = [r for r in reports if not r.error]
-    rows = [f"{'Pair':<8}{'Bias':>5}{'BUY':>5}{'SELL':>6}  ตลาด"]
+    rows = [f"{'Pair':<7}{'Bias':<5}{'BUY':>4}{'SELL':>5} ตลาด"]
     for r in sorted(ok, key=lambda r: -max(r.buy_score, r.sell_score)):
-        rows.append(f"{r.symbol:<8}{r.bias:>5}{r.buy_score:>5.0f}"
-                    f"{r.sell_score:>6.0f}  {r.regime[:14]}")
+        rows.append(f"{r.symbol:<7}{r.bias:<5}{r.buy_score:>4.0f}"
+                    f"{r.sell_score:>5.0f} "
+                    f"{_REGIME_SHORT.get(r.regime, r.regime[:8])}")
     lines += ["", "<pre>" + "\n".join(html.escape(x) for x in rows) + "</pre>"]
 
     bad = [r for r in reports if r.error]
@@ -593,12 +643,15 @@ def format_pulse(views, macro_view=None, session: str = "", live: int = 0,
         sym, v = item
         return (sym not in primary, -v.steps_passed, -v.score)
 
-    rows = [f"{'Pair':<8}{'ราคา':>10}{'ทาง':>5}{'ขั้น':>5}  สถานะ"]
+    # ASCII header: a Thai heading is not one monospace cell wide, so it
+    # cannot sit over the column it names. Only the last cell, which has
+    # nothing to line up against, stays in Thai.
+    rows = [f"{'Pair':<7}{'Price':>9} {'Dir':<5}{'Step':>5} สถานะ"]
     for sym, v in sorted(best.items(), key=order):
         icon, word = _pulse_verdict(v.steps_passed)
         side = "BUY" if v.direction > 0 else "SELL" if v.direction < 0 else "-"
-        rows.append(f"{sym:<8}{_fmt(v.price, sym):>10}{side:>5}"
-                    f"{v.steps_passed:>3}/11  {word}")
+        rows.append(f"{sym:<7}{_fmt(v.price, sym):>9} {side:<5}"
+                    f"{v.steps_passed:>2}/11 {word}")
     lines += ["", "<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>"]
 
     # What is actually stopping the ones that are closest, and why.
@@ -777,24 +830,38 @@ def format_plan_status(board, now=None) -> str:
         lines.append("<i>ยังไม่มีแผนที่เปิดอยู่หรือปิดใน 24 ชม.ที่ผ่านมา</i>")
         return "\n".join(lines)
 
-    def rows_for(sigs, with_stage: bool):
-        # ASCII header: Thai glyphs do not hold a monospace column on mobile
-        rows = [f"{'Pair':<8}{'':<5}{'Entry':>9}{'SL':>10}"
-                f"{'TP1':>10}{'TP2':>10}{'TP3':>10}"]
+    def rows_running(sigs):
+        """An open plan is a decision to make, so it gets its levels in full."""
+        rows = []
+        for g in sigs:
+            if rows:
+                rows.append("")
+            rows.append(f"{g.symbol} {g.side} · {stage_of(g)}")
+            rows += _plan_rows(g)
+        return rows
+
+    def rows_closed(sigs):
+        """A finished plan is history: where it went in, where it came out.
+
+        ASCII header - Thai glyphs do not hold a monospace column on mobile.
+        """
+        rows = [f"{'Pair':<7}{'Side':<5}{'Entry':>9}{'Exit':>12}"]
         for g in sigs:
             sym = g.symbol
-            rows.append(f"{sym:<8}{g.side:<5}"
-                        f"{_fmt(g.entry, sym):>9}{_fmt(g.sl, sym):>10}"
-                        f"{_fmt(g.tp1, sym):>10}{_fmt(g.tp2, sym):>10}"
-                        f"{_fmt(g.tp3, sym):>10}")
-            if with_stage:
-                rows.append(f"{'':<13}▸ {stage_of(g)}")
+            out = (g.tp3 if g.tp3_hit else g.sl if g.status == "SL_HIT"
+                   else g.tp2 if g.tp2_hit else g.tp1 if g.tp1_hit else None)
+            # A cancelled plan expired without ever being filled, so there
+            # is no exit price to report - saying "entry" would read as a
+            # trade that went nowhere rather than one that never started.
+            exit_txt = _fmt(out, sym) if out is not None else "-"
+            rows.append(f"{sym:<7}{g.side:<5}{_fmt(g.entry, sym):>9}"
+                        f" -> {exit_txt:>8}")
         return rows
 
     def block(title, sigs, with_stage=False):
         if not sigs:
             return []
-        body = rows_for(sigs, with_stage)
+        body = rows_running(sigs) if with_stage else rows_closed(sigs)
         return ["", f"<b>{title} ({len(sigs)})</b>",
                 "<pre>" + "\n".join(html.escape(b) for b in body) + "</pre>"]
 
