@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-07T13:25:44+00:00",
+  "updated": "2026-08-07T13:30:43+00:00",
   "messages": [
     {
       "at": "2026-08-06T23:03:33+00:00",
@@ -319,6 +319,17 @@
         "EURUSD"
       ],
       "text": "📅 รอบค่ำ 20:00 น. · 07/08\nช่วงนิวยอร์กเข้าตลาด · คาบเกี่ยวกับลอนดอน ผันผวนสูงสุดของวัน\n⚪ Mixed · DXY ▼-0.3% · US10Y ▼-0.1% · VIX ▼-0.1%\nดอลลาร์ อ่อนค่า (-0.31%) — หนุนทองและสินค้าโภคภัณฑ์\n⚖️ ความเสี่ยง: MEDIUM — ส่วนใหญ่ยังไม่เลือกทาง เหมาะกับการรอมากกว่าไล่เข้า\n📨 สัญญาณวันนี้: ทอง 0 · คู่เงิน 0 (ไม่จำกัดจำนวน)\n\nPair   Bias  BUY SELL ตลาด\nXAUUSD WAIT   60   31 LiqHunt\nGBPUSD WAIT   53   37 Exhaust\nUSDCHF WAIT   32   51 Range\nUSDJPY WAIT   34   50 LiqHunt\nAUDUSD WAIT   50   34 Exhaust\nUSDCAD WAIT   27   49 Brk.Fake\nNZDUSD WAIT   48   36 Exhaust\nEURUSD WAIT   47   35 Exhaust\nรายงานเพื่อวางแผน · สัญญาณเข้าจริงส่งแยกเมื่อเงื่อนไขครบ"
+    },
+    {
+      "at": "2026-08-07T13:30:26+00:00",
+      "kind": "sl",
+      "title": "📌 สถานะแผนทั้งหมด · 07/08 20:30 น.",
+      "symbols": [
+        "GBPUSD",
+        "USDCAD",
+        "AUDUSD"
+      ],
+      "text": "📌 สถานะแผนทั้งหมด · 07/08 20:30 น.\n\n🔴 โดน SL (3)\nPair   Side     Entry        Exit\nGBPUSD BUY    1.34606 ->  1.34484\nUSDCAD SELL   1.40119 ->  1.40251\nAUDUSD SELL   0.70418 ->  0.70526\nปิดแล้วแสดงย้อนหลัง 24 ชม. · ที่เปิดอยู่แสดงทั้งหมด"
     }
   ]
 }
