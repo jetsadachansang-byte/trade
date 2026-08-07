@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-07T12:55:33+00:00",
+  "updated": "2026-08-07T13:00:48+00:00",
   "messages": [
     {
       "at": "2026-08-06T23:03:33+00:00",
@@ -303,6 +303,22 @@
         "AUDUSD"
       ],
       "text": "🛑 Stop Loss Hit @ 0.70526\n📊 AUDUSD SELL\nEntry   0.70418\nSL      0.70526\nTP1     0.70323  ถึงแล้ว\nTP2     0.70208\nTP3     0.70063\n🆔 1786028730"
+    },
+    {
+      "at": "2026-08-07T13:00:36+00:00",
+      "kind": "session",
+      "title": "📅 รอบค่ำ 20:00 น. · 07/08",
+      "symbols": [
+        "XAUUSD",
+        "GBPUSD",
+        "USDCHF",
+        "USDJPY",
+        "AUDUSD",
+        "USDCAD",
+        "NZDUSD",
+        "EURUSD"
+      ],
+      "text": "📅 รอบค่ำ 20:00 น. · 07/08\nช่วงนิวยอร์กเข้าตลาด · คาบเกี่ยวกับลอนดอน ผันผวนสูงสุดของวัน\n⚪ Mixed · DXY ▼-0.3% · US10Y ▼-0.1% · VIX ▼-0.1%\nดอลลาร์ อ่อนค่า (-0.31%) — หนุนทองและสินค้าโภคภัณฑ์\n⚖️ ความเสี่ยง: MEDIUM — ส่วนใหญ่ยังไม่เลือกทาง เหมาะกับการรอมากกว่าไล่เข้า\n📨 สัญญาณวันนี้: ทอง 0 · คู่เงิน 0 (ไม่จำกัดจำนวน)\n\nPair   Bias  BUY SELL ตลาด\nXAUUSD WAIT   60   31 LiqHunt\nGBPUSD WAIT   53   37 Exhaust\nUSDCHF WAIT   32   51 Range\nUSDJPY WAIT   34   50 LiqHunt\nAUDUSD WAIT   50   34 Exhaust\nUSDCAD WAIT   27   49 Brk.Fake\nNZDUSD WAIT   48   36 Exhaust\nEURUSD WAIT   47   35 Exhaust\nรายงานเพื่อวางแผน · สัญญาณเข้าจริงส่งแยกเมื่อเงื่อนไขครบ"
     }
   ]
 }
