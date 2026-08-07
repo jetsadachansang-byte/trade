@@ -215,3 +215,142 @@ def _notes(rev: DayReview) -> list:
         if worst[1][1] < 0:
             out.append(f"คู่ที่เสียมากสุดรอบนี้: {worst[0]} ({worst[1][1]:+.2f}R)")
     return out
+
+
+# ----------------------------------------------------------------------
+# The status board, and the week's tally. Both read the same stored
+# signals the daily review does - nothing new is computed about the
+# market, only about what was already sent.
+# ----------------------------------------------------------------------
+
+def status_due(state, now: datetime, hours: float) -> bool:
+    if hours <= 0:
+        return False
+    last = getattr(state, "last_status_at", "")
+    if not last:
+        return True
+    return (now - datetime.fromisoformat(last)).total_seconds() / 3600 >= hours
+
+
+@dataclass
+class PlanBoard:
+    """Every plan and where it stands, sorted into four buckets."""
+    running: list = field(default_factory=list)    # still open
+    won: list = field(default_factory=list)        # reached TP3
+    lost: list = field(default_factory=list)       # stopped out
+    cancelled: list = field(default_factory=list)  # expired unfilled
+    since: datetime = None
+
+
+def board(state, now: datetime, closed_hours: int = 24) -> PlanBoard:
+    """Live plans, plus the ones that finished recently.
+
+    Every plan ever sent would grow without limit and bury today's under
+    last week's, so finished plans age out while open ones never do - an
+    open plan is still a decision the reader has to make.
+    """
+    cutoff = now - timedelta(hours=closed_hours)
+    out = PlanBoard(since=cutoff)
+    for sig in state.signals:
+        if sig.is_live:
+            out.running.append(sig)
+            continue
+        closed = getattr(sig, "closed_at", "")
+        if closed:
+            try:
+                when = datetime.fromisoformat(closed)
+            except ValueError:
+                continue
+            if when < cutoff:
+                continue
+        elif sig.created_at() < cutoff:
+            continue
+        if sig.status == ST.SL_HIT:
+            out.lost.append(sig)
+        elif sig.status == ST.CANCELLED:
+            out.cancelled.append(sig)
+        else:
+            out.won.append(sig)
+    return out
+
+
+def stage_of(sig) -> str:
+    """How far a plan has got, in three words or fewer."""
+    if sig.tp3_hit:
+        return "ครบ TP3"
+    if sig.tp2_hit:
+        return "ถึง TP2"
+    if sig.tp1_hit:
+        return "ถึง TP1"
+    return "ยังไม่ถึง TP1"
+
+
+# --- the week -----------------------------------------------------------
+
+def week_window(now: datetime, hour: int = 6, tz=BANGKOK) -> tuple:
+    """The seven days ending at this Sunday's report hour."""
+    local = now.astimezone(tz)
+    end = local.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if local < end:
+        end -= timedelta(days=1)
+    return end - timedelta(days=7), end
+
+
+def weekly_due(state, now: datetime, hour: int = 6, weekday: int = 6) -> bool:
+    """Sunday morning, once. `weekday` is Python's: Monday 0, Sunday 6."""
+    local = now.astimezone(BANGKOK)
+    if local.weekday() != weekday or local.hour < hour:
+        return False
+    return getattr(state, "last_weekly_date", "") != local.date().isoformat()
+
+
+@dataclass
+class WeekReview:
+    start: datetime = None
+    end: datetime = None
+    issued: int = 0
+    won: int = 0
+    lost: int = 0
+    cancelled: int = 0
+    still_open: int = 0
+    tp_counts: tuple = (0, 0, 0)     # how many plans reached TP1 / TP2 / TP3
+    tp_total: int = 0                # take profits collected in total
+    total_r: float = 0.0
+    win_rate: float = 0.0
+    by_symbol: dict = field(default_factory=dict)
+
+
+def weekly(state, now: datetime, hour: int = 6) -> WeekReview:
+    start, end = week_window(now, hour)
+    rev = WeekReview(start=start, end=end)
+
+    for sig in state.signals:
+        if not _in_window(sig.created, start, end):
+            continue
+        rev.issued += 1
+        if sig.is_live:
+            rev.still_open += 1
+        r, _ = realised_r(sig)
+        rev.total_r += r
+        n, acc = rev.by_symbol.get(sig.symbol, (0, 0.0))
+        rev.by_symbol[sig.symbol] = (n + 1, round(acc + r, 2))
+
+        hits = [sig.tp1_hit, sig.tp2_hit, sig.tp3_hit]
+        rev.tp_counts = tuple(c + int(h) for c, h in zip(rev.tp_counts, hits))
+        rev.tp_total += sum(hits)
+
+        if sig.status == ST.CANCELLED:
+            rev.cancelled += 1
+        elif sig.is_live:
+            pass                       # not decided yet, counts neither way
+        elif r > 0.05:
+            rev.won += 1
+        elif r < -0.05:
+            rev.lost += 1
+        else:
+            rev.cancelled += 1         # closed at break-even
+
+    decided = rev.won + rev.lost
+    rev.win_rate = (rev.won / decided * 100.0) if decided else 0.0
+    rev.total_r = round(rev.total_r, 2)
+    return rev

@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         for query in queries[-3:]:          # a burst of typing is not a queue
             matches, total = archive.search(query, cfg.search_results)
             tg.send(notifier.format_search(query, matches, total,
-                                           cfg.archive_days))
+                                           cfg.archive_days), archive=False)
             print(f"search {query!r}: {total} match(es)")
 
     # tracking runs even outside kill zones - an open signal must be
@@ -484,6 +484,28 @@ def main(argv: list[str] | None = None) -> int:
         high = sum(1 for e in events if e.high)
         print(f"news agenda sent: {len(events)} event(s), {high} high impact"
               + (f" · error: {news_error[:60]}" if news_error else ""))
+
+    # --- The plan status board, hourly --------------------------------
+    # Status only, no reasoning: this answers "where does everything
+    # stand" and nothing else. Reads the stored signals, so it works even
+    # on a run where the market data never loaded.
+    if day_review.status_due(state, now, cfg.plan_status_hours):
+        plans = day_review.board(state, now, cfg.plan_status_window)
+        tg.send(notifier.format_plan_status(plans, now))
+        state.last_status_at = now.isoformat(timespec="seconds")
+        print(f"plan status: {len(plans.running)} running, "
+              f"{len(plans.won)} won, {len(plans.lost)} lost, "
+              f"{len(plans.cancelled)} cancelled")
+
+    # --- The week, closed off on Sunday morning ------------------------
+    if cfg.weekly_summary and day_review.weekly_due(
+            state, now, cfg.weekly_summary_hour):
+        week = day_review.weekly(state, now, cfg.weekly_summary_hour)
+        tg.send(notifier.format_weekly(week, memory_bank.summary(state.signals)))
+        state.last_weekly_date = now.astimezone(
+            daily_report.BANGKOK).date().isoformat()
+        print(f"weekly sent: {week.issued} issued, {week.won}W/{week.lost}L, "
+              f"{week.tp_total} TP(s), {week.total_r:+.2f}R")
 
     # --- Daily Result Review: how yesterday's signals actually did ----
     # Sent before the planning report, so the morning reads in the order a

@@ -242,6 +242,19 @@ class Settings:
     # Status is sent only on request now (--status). It was a repository
     # variable, which meant one setting turned every scan into a message.
 
+    # --- สถานะแผนรายชั่วโมง + สรุปรายสัปดาห์ -----------------------------
+    # กระดานสถานะ: แผนไหนยังวิ่ง แผนไหนครบ TP3 แผนไหนโดน SL (0 = ปิด)
+    plan_status_hours: float = field(
+        default_factory=lambda: _env_float("PLAN_STATUS_HOURS", 1.0))
+    # แสดงแผนที่ปิดไปแล้วย้อนหลังกี่ชั่วโมง (ที่ยังเปิดอยู่แสดงเสมอ)
+    plan_status_window: int = field(
+        default_factory=lambda: _env_int("PLAN_STATUS_WINDOW", 24))
+    # สรุปทั้งสัปดาห์ วันอาทิตย์เช้า
+    weekly_summary: bool = field(
+        default_factory=lambda: _env_bool("WEEKLY_SUMMARY", True))
+    weekly_summary_hour: int = field(
+        default_factory=lambda: _env_int("WEEKLY_SUMMARY_HOUR", 6))
+
     # --- ค้นข้อความเก่าด้วยคีย์เวิร์ด ------------------------------------
     # บอทเก็บข้อความที่ส่งไปแล้วไว้ พิมพ์คำค้นเข้ามาใน Telegram แล้วมันจะ
     # ตอบกลับพร้อมข้อความที่ตรงคำนั้น (ตอบในรอบสแกนถัดไป)

@@ -144,6 +144,10 @@ jobs:
           PULSE_HOURS: ${{ vars.PULSE_HOURS }}
           NEWS_AGENDA: ${{ vars.NEWS_AGENDA }}
           NEWS_AGENDA_HOUR: ${{ vars.NEWS_AGENDA_HOUR }}
+          PLAN_STATUS_HOURS: ${{ vars.PLAN_STATUS_HOURS }}
+          PLAN_STATUS_WINDOW: ${{ vars.PLAN_STATUS_WINDOW }}
+          WEEKLY_SUMMARY: ${{ vars.WEEKLY_SUMMARY }}
+          WEEKLY_SUMMARY_HOUR: ${{ vars.WEEKLY_SUMMARY_HOUR }}
           MESSAGE_ARCHIVE: ${{ vars.MESSAGE_ARCHIVE }}
           ARCHIVE_DAYS: ${{ vars.ARCHIVE_DAYS }}
           SEARCH_RESULTS: ${{ vars.SEARCH_RESULTS }}
