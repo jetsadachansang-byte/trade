@@ -86,6 +86,7 @@ class State:
     last_briefing_at: str = ""         # ISO-8601 UTC of the last chart briefing
     last_gold_scan_at: str = ""        # gold runs on its own slower clock
     last_pulse_at: str = ""            # last market-pulse check
+    last_status_at: str = ""           # last hourly plan-status board
     macro: dict = field(default_factory=dict)   # LEVEL 1 snapshot, refreshed hourly
     # Bangkok date of the last daily analysis, so the 06:00 report goes
     # out once a morning however many times the scan runs.
@@ -98,6 +99,8 @@ class State:
     last_summary_date: str = ""
     # Bangkok date of the last news agenda, so it goes out once a morning.
     last_news_date: str = ""
+    # Bangkok date of the last Sunday tally, so the week closes once.
+    last_weekly_date: str = ""
     # Telegram update id to resume from, so a search typed into the chat is
     # answered exactly once rather than on every scan forever.
     last_update_id: int = 0
@@ -116,6 +119,8 @@ class State:
                    last_briefing_at=raw.get("last_briefing_at", ""),
                    last_gold_scan_at=raw.get("last_gold_scan_at", ""),
                    last_pulse_at=raw.get("last_pulse_at", ""),
+                   last_status_at=raw.get("last_status_at", ""),
+                   last_weekly_date=raw.get("last_weekly_date", ""),
                    macro=raw.get("macro", {}),
                    last_daily_date=raw.get("last_daily_date", ""),
                    last_daily_slot=raw.get("last_daily_slot", ""),
@@ -134,6 +139,8 @@ class State:
             "last_briefing_at": self.last_briefing_at,
             "last_gold_scan_at": self.last_gold_scan_at,
             "last_pulse_at": self.last_pulse_at,
+            "last_status_at": self.last_status_at,
+            "last_weekly_date": self.last_weekly_date,
             "macro": self.macro,
             "last_daily_date": self.last_daily_date,
             "last_daily_slot": self.last_daily_slot,

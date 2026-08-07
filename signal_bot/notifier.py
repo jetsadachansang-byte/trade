@@ -719,3 +719,80 @@ def _snippet(text: str, query: str, width: int = 150) -> str:
             end = min(len(body), start + width)
             return ("…" if start else "") + body[start:end] + ("…" if end < len(body) else "")
     return body[:width] + ("…" if len(body) > width else "")
+
+
+def format_plan_status(board, now=None) -> str:
+    """Where every plan stands. Status only - no reasoning, by request."""
+    from .daily import BANGKOK
+    from .review import stage_of
+    stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
+    lines = [f"📌 <b>สถานะแผนทั้งหมด</b> · {stamp.strftime('%d/%m %H:%M')} น."]
+
+    total = (len(board.running) + len(board.won) + len(board.lost)
+             + len(board.cancelled))
+    if not total:
+        lines.append("<i>ยังไม่มีแผนที่เปิดอยู่หรือปิดใน 24 ชม.ที่ผ่านมา</i>")
+        return "\n".join(lines)
+
+    def block(title, rows, extra=None):
+        if not rows:
+            return []
+        out = ["", f"<b>{title} ({len(rows)})</b>"]
+        body = []
+        for sig in rows:
+            # _fmt, not the raw float: Python prints 1.085 for a price that
+            # is quoted 1.08500, and a price that does not look like a price
+            # is the kind of detail that makes a reader doubt the rest.
+            line = f"{sig.symbol:<8}{sig.side:<5}{_fmt(sig.entry, sig.symbol):>10}"
+            if extra:
+                line += f"  {extra(sig)}"
+            body.append(line)
+        out.append("<pre>" + "\n".join(html.escape(b) for b in body) + "</pre>")
+        return out
+
+    lines += block("🟢 กำลังดำเนินการ", board.running, stage_of)
+    lines += block("✅ ครบ TP3", board.won)
+    lines += block("🔴 โดน SL", board.lost)
+    lines += block("⚪ ยกเลิก", board.cancelled)
+    lines.append("<i>ปิดแล้วแสดงย้อนหลัง 24 ชม. · ที่เปิดอยู่แสดงทั้งหมด</i>")
+    return "\n".join(lines)
+
+
+def format_weekly(rev, memory_line: str = "") -> str:
+    """The week's tally: how many won, how many lost, how many TPs banked."""
+    from .daily import BANGKOK
+    span = (f"{rev.start.astimezone(BANGKOK).strftime('%d/%m')}"
+            f" – {rev.end.astimezone(BANGKOK).strftime('%d/%m')}")
+    lines = [f"📊 <b>สรุปสัปดาห์</b> · {span}"]
+
+    if not rev.issued:
+        lines.append("<i>สัปดาห์นี้ไม่มีแผนถูกส่งออกเลย</i>")
+        return "\n".join(lines)
+
+    sign = "🟢" if rev.total_r > 0 else "🔴" if rev.total_r < 0 else "⚪"
+    lines += [
+        f"ส่งแผนทั้งหมด <b>{rev.issued}</b> ไม้",
+        f"✅ ชนะ <b>{rev.won}</b> · 🔴 แพ้ <b>{rev.lost}</b> · "
+        f"⚪ เสมอ/ยกเลิก <b>{rev.cancelled}</b>"
+        + (f" · ⏳ ยังถืออยู่ <b>{rev.still_open}</b>" if rev.still_open else ""),
+        f"📈 อัตราชนะ <b>{rev.win_rate:.0f}%</b>",
+        f"{sign} ผลรวม <b>{rev.total_r:+.2f}R</b>",
+        "",
+        "<b>เก็บ TP ได้</b>",
+    ]
+    t1, t2, t3 = rev.tp_counts
+    rows = [f"{'TP1':<6}{t1:>4}", f"{'TP2':<6}{t2:>4}", f"{'TP3':<6}{t3:>4}",
+            f"{'TOTAL':<6}{rev.tp_total:>4}"]
+    lines.append("<pre>" + "\n".join(html.escape(r) for r in rows) + "</pre>")
+
+    if rev.by_symbol:
+        # ASCII header: Thai glyphs do not hold a monospace column on mobile
+        srows = [f"{'Pair':<9}{'N':>4}{'R':>9}"]
+        for sym, (n, r) in sorted(rev.by_symbol.items(), key=lambda kv: -kv[1][1]):
+            srows.append(f"{sym:<9}{n:>4}{r:>+9.2f}")
+        lines += ["<b>แยกตามคู่</b>",
+                  "<pre>" + "\n".join(html.escape(r) for r in srows) + "</pre>"]
+    if memory_line:
+        lines.append(f"📚 <i>{_esc(memory_line)}</i>")
+    lines.append("<i>R คิดตามกฎจัดการไม้ของระบบ ไม่ใช่ผลจากบัญชีจริง</i>")
+    return "\n".join(lines)
