@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-07T08:25:32+00:00",
+  "updated": "2026-08-07T08:30:47+00:00",
   "messages": [
     {
       "at": "2026-08-06T23:03:33+00:00",
@@ -228,6 +228,28 @@
         "USDCAD"
       ],
       "text": "📌 สถานะแผนทั้งหมด · 07/08 15:15 น.\n\n🟢 กำลังดำเนินการ (1)\nPair             Entry        SL       TP1       TP2       TP3\nAUDUSD  SELL   0.70418   0.70526   0.70323   0.70208   0.70063\n             ▸ ถึง TP1\n\n🔴 โดน SL (2)\nPair             Entry        SL       TP1       TP2       TP3\nGBPUSD  BUY    1.34606   1.34484   1.34740   1.34903   1.35107\nUSDCAD  SELL   1.40119   1.40251   1.39966   1.39784   1.39553\nปิดแล้วแสดงย้อนหลัง 24 ชม. · ที่เปิดอยู่แสดงทั้งหมด"
+    },
+    {
+      "at": "2026-08-07T08:30:29+00:00",
+      "kind": "pulse",
+      "title": "📡 เช็คตลาด · 07/08 15:30 น. · London",
+      "symbols": [
+        "XAUUSD",
+        "EURJPY",
+        "USDCHF",
+        "AUDUSD",
+        "AUDJPY",
+        "USDJPY",
+        "CHFJPY",
+        "EURUSD",
+        "GBPUSD",
+        "NZDUSD",
+        "USDCAD",
+        "GBPJPY",
+        "EURGBP",
+        "CADJPY"
+      ],
+      "text": "📡 เช็คตลาด · 07/08 15:30 น. · London\n🔴 Risk Off · DXY ▲+0.0% · US10Y ▲+1.1% · VIX ▲+0.6%\n📌 ไม้ที่ถืออยู่ 1 · ส่งวันนี้ 0\n\nPair          ราคา  ทาง ขั้น  สถานะ\nXAUUSD     4296.11  BUY  7/11  กำลังก่อตัว\nEURJPY      182.52 SELL  9/11  ใกล้แล้ว\nUSDCHF     0.81155  BUY  8/11  ใกล้แล้ว\nAUDUSD     0.70368  BUY  4/11  กำลังก่อตัว\nAUDJPY      111.44  BUY  4/11  กำลังก่อตัว\nUSDJPY      158.44  BUY  2/11  รอ\nCHFJPY      195.24 SELL  2/11  รอ\nEURUSD     1.15234    -  0/11  ไม่มีทาง\nGBPUSD     1.34456    -  0/11  ไม่มีทาง\nNZDUSD     0.58689    -  0/11  ไม่มีทาง\nUSDCAD     1.40284    -  0/11  ไม่มีทาง\nGBPJPY      213.01    -  0/11  ไม่มีทาง\nEURGBP     0.85683    -  0/11  ไม่มีทาง\nCADJPY      112.94    -  "
     }
   ]
 }
