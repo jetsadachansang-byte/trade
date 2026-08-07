@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-07T02:05:43+00:00",
+  "updated": "2026-08-07T02:10:40+00:00",
   "messages": [
     {
       "at": "2026-08-06T23:03:33+00:00",
@@ -96,6 +96,28 @@
         "USDCAD"
       ],
       "text": "📅 รอบเช้า 06:00 น. · 07/08\nก่อนเปิดลอนดอน · สรุปสิ่งที่รอบเอเชียทำไว้และวางแผนทั้งวัน\n⚪ Mixed · DXY ▲+0.3% · US10Y ▲+1.1% · VIX ▼-4.2%\nดอลลาร์ แข็งค่า (+0.28%) — กดดันทองและสินค้าโภคภัณฑ์\n⚖️ ความเสี่ยง: MEDIUM — ส่วนใหญ่ยังไม่เลือกทาง เหมาะกับการรอมากกว่าไล่เข้า\n📨 สัญญาณวันนี้: ทอง 1 · คู่เงิน 2 (ไม่จำกัดจำนวน)\n\nPair     Bias  BUY  SELL  ตลาด\nXAUUSD   WAIT   27    60  Liquidity Hunt\nNZDUSD   WAIT   41    60  Range\nAUDUSD   WAIT   34    58  Range\nEURUSD   WAIT   26    58  Range\nUSDCHF   WAIT   56    37  Liquidity Hunt\nGBPUSD   WAIT   36    56  Liquidity Hunt\nUSDJPY   WAIT   52    30  Liquidity Hunt\nUSDCAD   WAIT   39    50  Liquidity Hunt\nรายงานเพื่อวางแผน · สัญญาณเข้าจริงส่งแยกเมื่อเงื่อนไขค"
+    },
+    {
+      "at": "2026-08-07T02:10:23+00:00",
+      "kind": "pulse",
+      "title": "📡 เช็คตลาด · 07/08 09:10 น. · Asian",
+      "symbols": [
+        "XAUUSD",
+        "AUDUSD",
+        "USDJPY",
+        "USDCHF",
+        "AUDJPY",
+        "CHFJPY",
+        "EURUSD",
+        "GBPUSD",
+        "NZDUSD",
+        "USDCAD",
+        "EURJPY",
+        "GBPJPY",
+        "EURGBP",
+        "CADJPY"
+      ],
+      "text": "📡 เช็คตลาด · 07/08 09:10 น. · Asian\n⚪ Mixed · DXY ▼-0.0% · US10Y ▲+1.1% · VIX ▼-4.2%\n📌 ไม้ที่ถืออยู่ 2 · ส่งวันนี้ 0\n\nPair          ราคา  ทาง ขั้น  สถานะ\nXAUUSD     4259.31  BUY 10/11  ใกล้แล้ว\nAUDUSD     0.70294 SELL  7/11  กำลังก่อตัว\nUSDJPY      158.37  BUY  2/11  รอ\nUSDCHF     0.81254  BUY  2/11  รอ\nAUDJPY      111.28  BUY  2/11  รอ\nCHFJPY      194.89 SELL  2/11  รอ\nEURUSD     1.15247    -  0/11  ไม่มีทาง\nGBPUSD     1.34533    -  0/11  ไม่มีทาง\nNZDUSD     0.58679    -  0/11  ไม่มีทาง\nUSDCAD     1.40164    -  0/11  ไม่มีทาง\nEURJPY      182.47    -  0/11  ไม่มีทาง\nGBPJPY      213.04    -  0/11  ไม่มีทาง\nEURGBP     0.85643    -  0/11  ไม่มีทาง\nCADJPY      112.99    -  0/11  ไม่มีทาง\n🟡 ใกล้เ"
     }
   ]
 }
