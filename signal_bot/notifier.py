@@ -54,17 +54,22 @@ class Telegram:
                 out.append(text)
         return out, highest
 
-    def send(self, text: str) -> bool:
+    def send(self, text: str, archive: bool = True) -> bool:
         """Send a message, splitting it if Telegram would reject the length.
 
         Telegram caps a message at 4096 characters and answers anything
         longer with "message is too long" - which is how the whole chart
         briefing went missing. Splitting happens on line boundaries so no
         HTML tag is ever cut in half.
+
+        `archive=False` is for replies to a search. Filing those would let
+        a second search for the same word find the answer to the first,
+        and the quoted snippet inside would file the reply under whatever
+        kind of message it happened to quote.
         """
         chunks = _split(text)
         sent = all(self._send_one(part) for part in chunks)
-        if sent and self.archive is not None:
+        if sent and archive and self.archive is not None:
             from datetime import datetime as _dt
             self.archive.add(text, self.now or _dt.now(timezone.utc))
         return sent

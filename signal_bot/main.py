@@ -403,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         for query in queries[-3:]:          # a burst of typing is not a queue
             matches, total = archive.search(query, cfg.search_results)
             tg.send(notifier.format_search(query, matches, total,
-                                           cfg.archive_days))
+                                           cfg.archive_days), archive=False)
             print(f"search {query!r}: {total} match(es)")
 
     # tracking runs even outside kill zones - an open signal must be
