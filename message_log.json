@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-07T06:55:36+00:00",
+  "updated": "2026-08-07T07:00:54+00:00",
   "messages": [
     {
       "at": "2026-08-06T23:03:33+00:00",
@@ -172,6 +172,31 @@
         "USDCAD"
       ],
       "text": "📌 สถานะแผนทั้งหมด · 07/08 13:10 น.\n\n🟢 กำลังดำเนินการ (2)\nGBPUSD  BUY     1.34606  ถึง TP1\nAUDUSD  SELL    0.70418  ถึง TP1\n\n🔴 โดน SL (1)\nUSDCAD  SELL    1.40119\nปิดแล้วแสดงย้อนหลัง 24 ชม. · ที่เปิดอยู่แสดงทั้งหมด"
+    },
+    {
+      "at": "2026-08-07T07:00:39+00:00",
+      "kind": "session",
+      "title": "📅 รอบบ่าย 14:00 น. · 07/08",
+      "symbols": [
+        "EURUSD",
+        "XAUUSD",
+        "AUDUSD",
+        "NZDUSD",
+        "GBPUSD",
+        "USDCAD",
+        "USDJPY",
+        "USDCHF"
+      ],
+      "text": "📅 รอบบ่าย 14:00 น. · 07/08\nช่วงลอนดอนเข้าตลาด · สภาพคล่องเข้าหนัก เทรนด์ของวันมักเกิดตรงนี้\n⚪ Mixed · DXY ▼-0.0% · US10Y ▲+1.1% · VIX ▼-4.2%\nดอลลาร์ ทรงตัว (-0.01%) — เป็นกลางต่อทองและสินค้าโภคภัณฑ์\n⚖️ ความเสี่ยง: MEDIUM — ส่วนใหญ่ยังไม่เลือกทาง เหมาะกับการรอมากกว่าไล่เข้า\n📨 สัญญาณวันนี้: ทอง 0 · คู่เงิน 0 (ไม่จำกัดจำนวน)\n\nPair     Bias  BUY  SELL  ตลาด\nEURUSD   SELL   25    65  Range\nXAUUSD   WAIT   62    38  Liquidity Hunt\nAUDUSD   WAIT   47    55  Trend Exhausti\nNZDUSD   WAIT   48    54  Range\nGBPUSD   WAIT   54    42  Range\nUSDCAD   WAIT   43    51  Liquidity Hunt\nUSDJPY   WAIT   45    49  Liquidity Hunt\nUSDCHF   WAIT   46    49  Range\nรายงานเพื่อวางแผน · สัญญาณเข้าจริงส่งแยกเมื่อเงื่อนไ"
+    },
+    {
+      "at": "2026-08-07T07:00:39+00:00",
+      "kind": "session",
+      "title": "🎯 คู่ที่มีแผนรอบนี้",
+      "symbols": [
+        "EURUSD"
+      ],
+      "text": "🎯 คู่ที่มีแผนรอบนี้\n━━━━━━━━━━━━━━\n🔴 EURUSD SELL · ราคา 1.15260 (M5 · 1 นาที)\nเข้า 1.1526 – 1.15274 · SL 1.1535\nTP 1.15163 / 1.15047 / 1.14900 · RR 1:2.4 · EV +0.17R\n🗳 มติ 61/100 · สอดคล้อง 28% · ตลาดในกรอบ — ใช้ Wyckoff + Mean Reversion + Market Profile\n✅ Wyckoff 88 · News 100 · Risk / Execution 85\n▸ ราคาอยู่ในโซนเข้าแล้ว — รอแท่ง H1 ปิดยืนยัน\n━━━━━━━━━━━━━━\nถึง TP1 ปิด 1/3 + เลื่อน SL มาจุดเข้า · เสี่ยงไม่เกิน 1% ต่อไม้"
     }
   ]
 }
