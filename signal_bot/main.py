@@ -224,6 +224,27 @@ def profile_threshold(cfg: Settings, prof, shortfall: float) -> float:
     return max(cfg.min_score_floor, base - give)
 
 
+def build_outlook(symbol: str, cache: market_data.Cache, cfg: Settings,
+                  news_ctx, macro_view, session: str, now: datetime):
+    """The full trend read on one instrument, or one carrying its error.
+
+    A dead feed on one symbol must not take the other thirteen with it,
+    so the failure is carried inside the outlook and reported in that
+    pair's own message.
+    """
+    from . import outlook as outlook_engine
+    try:
+        frames = cache.frames(symbol, list(daily_report.LADDER))
+    except market_data.DataError as exc:
+        rep = daily_report.SymbolReport(symbol=symbol, error=str(exc)[:110])
+        return outlook_engine.build(rep, {}, news_ctx, now, cfg.swing_bars)
+    rep = daily_report.analyse_symbol(
+        symbol, frames, cfg,
+        bool(news_ctx is not None and getattr(news_ctx, "upcoming", None)),
+        macro_view, news_ctx, session)
+    return outlook_engine.build(rep, frames, news_ctx, now, cfg.swing_bars)
+
+
 class Hold:
     """A qualifying setup held back by a rate limit (for the status report)."""
 
@@ -448,6 +469,12 @@ def main(argv: list[str] | None = None) -> int:
     session = current_session(now)
     in_kz = in_kill_zone(cfg, now)
 
+    # Whether this run is one that loads gold at all. Read before the scan,
+    # because the scan stamps the clock it is derived from - afterwards the
+    # answer is always "no", which would defer the gold outlook forever.
+    gold_fresh = (cfg.gold_scan_minutes <= 0
+                  or state.minutes_since_gold_scan(now) >= cfg.gold_scan_minutes)
+
     rejections, errors, views = [], [], []
     scanned = False
     if not (market_open(now) or args.ignore_hours):
@@ -525,39 +552,88 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.daily_report and args.daily and slot is None:
         slot = (daily_report.slot_for(now, cfg.daily_report_hours)
                 or min(cfg.daily_report_hours or [6]))
+    # Analysis of a frozen chart is not analysis. Over the weekend the
+    # last candle simply stops moving, and an hourly read on it would say
+    # the same thing all weekend as though it were news. The slot is left
+    # unstamped so the report goes out on the session that actually opens.
+    charts_live = market_open(now) or args.ignore_hours
+    if slot is not None and not charts_live:
+        print("market closed - session analysis skipped")
+        slot = None
     if cfg.daily_report and slot is not None:
-        reports = []
-        for symbol in cfg.daily_symbols:
-            try:
-                frames = cache.frames(symbol, list(daily_report.LADDER))
-            except market_data.DataError as exc:
-                rep = daily_report.SymbolReport(symbol=symbol, error=str(exc)[:110])
-                reports.append(rep)
-                continue
-            reports.append(daily_report.analyse_symbol(
-                symbol, frames, cfg,
-                bool(news_ctx is not None and getattr(news_ctx, "upcoming", None)),
-                macro_view, news_ctx, session))
-
-        risk = daily_report.risk_level([r for r in reports if not r.error], macro_view)
-        gold = set(cfg.gold_symbols)
-        counts = (state.issued_today(now, symbols=gold), cfg.gold_daily_target,
-                  state.issued_today(now, exclude=gold), cfg.pair_daily_target)
-        # Two messages, not ten: the tape with every pair on one line, then
-        # the detail only for pairs that actually have a side.
-        tg.send(notifier.format_session_overview(
-            macro_view, reports, risk, slot, counts))
-        plans = notifier.format_session_plans(reports)
-        if plans:
-            tg.send(plans)
+        # One pair per message, every pair, nothing summarised away. A
+        # table with fourteen instruments on it answers "what is the
+        # market doing" and nothing else; this answers "what is *this*
+        # pair doing, where are its levels, and what happens if it gets
+        # there" - which is the question a plan is actually made from.
+        label = daily_report.SESSIONS.get(slot, ("", ""))[0]
+        symbols = cfg.outlook_universe() if cfg.outlook else cfg.daily_symbols
+        ok = 0
+        if cfg.outlook:
+            tg.send(notifier.format_outlook_header(
+                label, slot, symbols, macro_view, now))
+            for symbol in symbols:
+                view = build_outlook(symbol, cache, cfg, news_ctx, macro_view,
+                                     session, now)
+                tg.send(notifier.format_outlook(view, now))
+                ok += 0 if view.error else 1
+                if cfg.is_gold(symbol):
+                    state.last_gold_outlook_at = now.isoformat(timespec="seconds")
+        else:
+            # OUTLOOK=false falls back to the compact two-message report:
+            # one line per pair instead of a page each.
+            reports = []
+            for symbol in symbols:
+                try:
+                    frames = cache.frames(symbol, list(daily_report.LADDER))
+                except market_data.DataError as exc:
+                    reports.append(daily_report.SymbolReport(
+                        symbol=symbol, error=str(exc)[:110]))
+                    continue
+                reports.append(daily_report.analyse_symbol(
+                    symbol, frames, cfg,
+                    bool(news_ctx is not None and getattr(news_ctx, "upcoming", None)),
+                    macro_view, news_ctx, session))
+            risk = daily_report.risk_level(
+                [r for r in reports if not r.error], macro_view)
+            gold = set(cfg.gold_symbols)
+            counts = (state.issued_today(now, symbols=gold), cfg.gold_daily_target,
+                      state.issued_today(now, exclude=gold), cfg.pair_daily_target)
+            tg.send(notifier.format_session_overview(
+                macro_view, reports, risk, slot, counts))
+            plans = notifier.format_session_plans(reports)
+            if plans:
+                tg.send(plans)
+            ok = sum(1 for r in reports if not r.error)
 
         state.last_daily_slot = daily_report.slot_key(now, slot)
         state.last_daily_date = now.astimezone(
             daily_report.BANGKOK).date().isoformat()
-        ok = sum(1 for r in reports if not r.error)
-        label = daily_report.SESSIONS.get(slot, ("", ""))[0]
-        print(f"market analysis ({label} {slot:02d}:00) sent for "
-              f"{ok}/{len(reports)} symbol(s)")
+        print(f"session analysis ({label} {slot:02d}:00) sent for "
+              f"{ok}/{len(symbols)} symbol(s)")
+
+    # --- Gold on its own hourly clock ---------------------------------
+    # Gold is the instrument that moves fastest and is watched closest, so
+    # it gets a full outlook every hour rather than three times a day. It
+    # is held to a run that already loaded gold: its data comes from a
+    # metered feed, and re-fetching six series on a run that did not scan
+    # gold would spend the daily budget on nothing new. The wait is at
+    # most one scan interval, and an overdue outlook goes anyway.
+    elif (cfg.outlook and cfg.outlook_gold_hours > 0 and cfg.gold_symbols
+            and charts_live):
+        since = state.minutes_since_gold_outlook(now)
+        due = since >= cfg.outlook_gold_hours * 60
+        overdue = since >= cfg.outlook_gold_hours * 90
+        if due and not (gold_fresh or overdue):
+            print("gold outlook: deferred to the next run that loads gold")
+        elif due:
+            for symbol in cfg.gold_symbols:
+                view = build_outlook(symbol, cache, cfg, news_ctx, macro_view,
+                                     session, now)
+                tg.send(notifier.format_outlook(view, now))
+                print(f"gold outlook sent: {symbol}"
+                      + (f" (error: {view.error[:60]})" if view.error else ""))
+            state.last_gold_outlook_at = now.isoformat(timespec="seconds")
 
     # --- Market pulse: where every pair stands, every few hours -------
     # Costs nothing: the scan already built a view of every symbol this

@@ -75,6 +75,11 @@ class SymbolReport:
     volatility: str = "normal"
     strategies: list = field(default_factory=list)
     trends: dict = field(default_factory=dict)      # timeframe -> UP/DOWN/SIDE
+    # The structure read of every timeframe, and the smart-money read of
+    # the plan timeframe. Kept rather than discarded so the trend outlook
+    # can describe each chart without analysing all six a second time.
+    structures: dict = field(default_factory=dict)
+    smart_money: object = None
     htf_support: str = ""
     atr: float = 0.0
     # zones
@@ -358,6 +363,7 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
             structures[tf] = S.analyse_structure(df, cfg.swing_bars, cfg.struct_lookback)
             rep.trends[tf] = _trend_word(structures[tf])
 
+    rep.structures = structures
     st_entry = structures.get(PLAN_TF)
     st_d1 = structures.get("D1", st_entry)
     st_h4 = structures.get("H4", st_entry)
@@ -372,6 +378,7 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
         return rep
 
     sm = S.analyse_smart_money(entry_df, st_entry, rep.atr, cfg.smc_window)
+    rep.smart_money = sm
     reg = REG.detect(entry_df, st_entry, sm, rep.atr, reg_news_active)
     rep.regime, rep.regime_confidence = reg.name, reg.confidence
     rep.volatility = reg.volatility
