@@ -812,7 +812,7 @@ def _snippet(text: str, query: str, width: int = 150) -> str:
     return body[:width] + ("…" if len(body) > width else "")
 
 
-def format_plan_status(board, now=None) -> str:
+def format_plan_status(board, now=None, closed: bool = False) -> str:
     """Where every plan stands, with the plan itself alongside the status.
 
     The status alone ("reached TP2") is only half an answer: acting on it
@@ -823,6 +823,9 @@ def format_plan_status(board, now=None) -> str:
     from .review import stage_of
     stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
     lines = [f"📌 <b>สถานะแผนทั้งหมด</b> · {stamp.strftime('%d/%m %H:%M')} น."]
+    if closed:
+        lines.append("🔒 <i>ตลาดปิดสุดสัปดาห์ — สถานะจะไม่เปลี่ยนจนตลาดเปิด"
+                     "เช้าวันจันทร์ รอบนี้จึงส่งครั้งเดียว</i>")
 
     total = (len(board.running) + len(board.won) + len(board.lost)
              + len(board.cancelled))
@@ -988,12 +991,22 @@ def format_outlook(o, now=None, closed: bool = False) -> str:
                      f"(มั่นใจ {o.regime_confidence:.0f}%) · ความผันผวน{vol}")
 
     # The plain answer first: everything below is the reasoning behind it.
-    v_icon = {"BUY": "🟢", "SELL": "🔴"}.get(o.verdict, "⚪")
-    v_word = {"BUY": "มีความได้เปรียบฝั่ง BUY",
-              "SELL": "มีความได้เปรียบฝั่ง SELL"}.get(
-                  o.verdict, "ยังไม่ควรเข้า รอให้ชัดก่อน")
-    why = f" — {_esc(o.verdict_why)}" if o.verdict_why else ""
-    lines.append(f"{v_icon} <b>ตอนนี้: {v_word}</b>{why}")
+    # With the market shut there is no "now" to answer for, so the same
+    # verdict is stated as what to carry into next week instead.
+    if closed:
+        v_word = {"BUY": "ฝั่ง BUY ได้เปรียบ",
+                  "SELL": "ฝั่ง SELL ได้เปรียบ"}.get(
+                      o.verdict, "ยังไม่เลือกข้าง")
+        lines.append(f"🔭 <b>แนวโน้มสัปดาห์หน้า: {v_word}</b> — "
+                     "รอตลาดเปิดเช้าวันจันทร์แล้วดูว่าโครงสร้างยังเป็นแบบนี้อยู่ไหม "
+                     "ก่อนตัดสินใจ")
+    else:
+        v_icon = {"BUY": "🟢", "SELL": "🔴"}.get(o.verdict, "⚪")
+        v_word = {"BUY": "มีความได้เปรียบฝั่ง BUY",
+                  "SELL": "มีความได้เปรียบฝั่ง SELL"}.get(
+                      o.verdict, "ยังไม่ควรเข้า รอให้ชัดก่อน")
+        why = f" — {_esc(o.verdict_why)}" if o.verdict_why else ""
+        lines.append(f"{v_icon} <b>ตอนนี้: {v_word}</b>{why}")
 
     # --- every timeframe ------------------------------------------------
     if o.reads:
