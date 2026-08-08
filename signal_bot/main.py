@@ -491,6 +491,13 @@ def main(argv: list[str] | None = None) -> int:
     session = current_session(now)
     in_kz = in_kill_zone(cfg, now)
 
+    # Which weekend this run falls in, empty while the market is open.
+    # Everything that repeats on a clock - the analysis and the plan board -
+    # goes out once for the whole closed window rather than on its usual
+    # cadence, because nothing underneath either of them can change.
+    charts_live = market_open(now) or args.ignore_hours
+    weekend = "" if charts_live else weekend_key(now)
+
     # Whether this run is one that loads gold at all. Read before the scan,
     # because the scan stamps the clock it is derived from - afterwards the
     # answer is always "no", which would defer the gold outlook forever.
@@ -535,11 +542,23 @@ def main(argv: list[str] | None = None) -> int:
     # Status only, no reasoning: this answers "where does everything
     # stand" and nothing else. Reads the stored signals, so it works even
     # on a run where the market data never loaded.
-    if day_review.status_due(state, now, cfg.plan_status_hours):
+    #
+    # Over the weekend it goes out once instead of hourly. Tracking is not
+    # running - there are no bars to check - so every hourly board from
+    # Friday's close to Monday's open would be a byte-for-byte copy of the
+    # one before it. One snapshot of what is being carried over the
+    # weekend is the whole of the information.
+    status_due = day_review.status_due(state, now, cfg.plan_status_hours)
+    if weekend:
+        status_due = state.last_weekend_status != weekend
+    if status_due:
         plans = day_review.board(state, now, cfg.plan_status_window)
-        tg.send(notifier.format_plan_status(plans, now))
+        tg.send(notifier.format_plan_status(plans, now, closed=bool(weekend)))
         state.last_status_at = now.isoformat(timespec="seconds")
-        print(f"plan status: {len(plans.running)} running, "
+        if weekend:
+            state.last_weekend_status = weekend
+        print(f"plan status{' (weekend, once)' if weekend else ''}: "
+              f"{len(plans.running)} running, "
               f"{len(plans.won)} won, {len(plans.lost)} lost, "
               f"{len(plans.cancelled)} cancelled")
 
@@ -574,12 +593,10 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.daily_report and args.daily and slot is None:
         slot = (daily_report.slot_for(now, cfg.daily_report_hours)
                 or min(cfg.daily_report_hours or [6]))
-    # Over the weekend the last candle simply stops moving, so repeating
-    # the analysis every session would send the same reading three times
-    # a day as though it were news. One weekend edition goes out instead,
-    # off Friday's close, and the rest of the weekend stays quiet.
-    charts_live = market_open(now) or args.ignore_hours
-    weekend = "" if charts_live else weekend_key(now)
+    # Sessions run as normal on a trading day. Over the weekend the last
+    # candle simply stops moving, so repeating the analysis every session
+    # would send the same reading three times a day as though it were
+    # news. One weekend edition goes out instead, off Friday's close.
     weekend_due = bool(weekend) and state.last_weekend_date != weekend
     if slot is not None and not charts_live and not weekend_due:
         print("market closed - weekend analysis already sent"

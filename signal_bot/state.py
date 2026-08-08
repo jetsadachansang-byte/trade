@@ -89,8 +89,11 @@ class State:
     last_status_at: str = ""           # last hourly plan-status board
     last_gold_outlook_at: str = ""     # last hourly gold trend outlook
     # The Saturday of the last weekend already covered. Over a closed
-    # market the analysis goes out once, not once per session.
+    # market the analysis goes out once, not once per session, and the
+    # plan board once instead of hourly - they are stamped separately
+    # because they are sent at different moments of the same weekend.
     last_weekend_date: str = ""
+    last_weekend_status: str = ""
     macro: dict = field(default_factory=dict)   # LEVEL 1 snapshot, refreshed hourly
     # Bangkok date of the last daily analysis, so the 06:00 report goes
     # out once a morning however many times the scan runs.
@@ -126,6 +129,7 @@ class State:
                    last_status_at=raw.get("last_status_at", ""),
                    last_gold_outlook_at=raw.get("last_gold_outlook_at", ""),
                    last_weekend_date=raw.get("last_weekend_date", ""),
+                   last_weekend_status=raw.get("last_weekend_status", ""),
                    last_weekly_date=raw.get("last_weekly_date", ""),
                    macro=raw.get("macro", {}),
                    last_daily_date=raw.get("last_daily_date", ""),
@@ -148,6 +152,7 @@ class State:
             "last_status_at": self.last_status_at,
             "last_gold_outlook_at": self.last_gold_outlook_at,
             "last_weekend_date": self.last_weekend_date,
+            "last_weekend_status": self.last_weekend_status,
             "last_weekly_date": self.last_weekly_date,
             "macro": self.macro,
             "last_daily_date": self.last_daily_date,
