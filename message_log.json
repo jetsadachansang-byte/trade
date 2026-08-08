@@ -1,5 +1,5 @@
 {
-  "updated": "2026-08-08T07:00:28+00:00",
+  "updated": "2026-08-08T07:05:24+00:00",
   "messages": [
     {
       "at": "2026-08-06T23:03:33+00:00",
@@ -822,6 +822,19 @@
         "AUDUSD"
       ],
       "text": "📌 สถานะแผนทั้งหมด · 08/08 13:00 น.\n\n🟢 กำลังดำเนินการ (5)\nAUDJPY BUY · ยังไม่ถึง TP1\nEntry    111.37\nSL       111.14\nTP1      111.66\nTP2      112.01\nTP3      112.45\n\nXAUUSD BUY · ยังไม่ถึง TP1\nEntry   4349.57\nSL      4312.88\nTP1     4395.80\nTP2     4451.21\nTP3     4521.29\n\nGBPJPY SELL · ยังไม่ถึง TP1\nEntry    212.52\nSL       213.14\nTP1      211.84\nTP2      211.01\nTP3      209.97\n\nGBPJPY SELL · ยังไม่ถึง TP1\nEntry    212.53\nSL       213.14\nTP1      211.85\nTP2      211.03\nTP3      210.00\n\nXAUUSD BUY · ยังไม่ถึง TP1\nEntry   4342.27\nSL      4339.33\nTP1     4344.62\nTP2     4347.14\nTP3     4347.15\n\n🔴"
+    },
+    {
+      "at": "2026-08-08T07:05:23+00:00",
+      "kind": "status",
+      "title": "📌 สถานะแผนทั้งหมด · 08/08 14:05 น.",
+      "symbols": [
+        "AUDJPY",
+        "XAUUSD",
+        "GBPJPY",
+        "GBPUSD",
+        "AUDUSD"
+      ],
+      "text": "📌 สถานะแผนทั้งหมด · 08/08 14:05 น.\n\n🟢 กำลังดำเนินการ (5)\nAUDJPY BUY · ยังไม่ถึง TP1\nEntry    111.37\nSL       111.14\nTP1      111.66\nTP2      112.01\nTP3      112.45\n\nXAUUSD BUY · ยังไม่ถึง TP1\nEntry   4349.57\nSL      4312.88\nTP1     4395.80\nTP2     4451.21\nTP3     4521.29\n\nGBPJPY SELL · ยังไม่ถึง TP1\nEntry    212.52\nSL       213.14\nTP1      211.84\nTP2      211.01\nTP3      209.97\n\nGBPJPY SELL · ยังไม่ถึง TP1\nEntry    212.53\nSL       213.14\nTP1      211.85\nTP2      211.03\nTP3      210.00\n\nXAUUSD BUY · ยังไม่ถึง TP1\nEntry   4342.27\nSL      4339.33\nTP1     4344.62\nTP2     4347.14\nTP3     4347.15\n\n🔴"
     }
   ]
 }
