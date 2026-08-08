@@ -67,6 +67,28 @@ def market_open(now: datetime) -> bool:
     return True
 
 
+def weekend_key(now: datetime) -> str:
+    """Which weekend this moment belongs to, as the Saturday's date.
+
+    Saturday and Sunday are one closed window, not two: the chart stops
+    at Friday's close and does not move again until Sunday night, so an
+    analysis run on Sunday reads exactly the same candles as one run on
+    Saturday. Keying both days to the same date is what makes "once over
+    the weekend" mean once rather than twice.
+
+    Empty string while the market is open.
+    """
+    from datetime import timedelta as _td
+    weekday = now.weekday()          # Mon=0 ... Sun=6
+    if weekday == 4 and now.hour >= 22:          # Friday after the close
+        return (now + _td(days=1)).date().isoformat()
+    if weekday == 5:                             # Saturday
+        return now.date().isoformat()
+    if weekday == 6 and now.hour < 22:           # Sunday before the reopen
+        return (now - _td(days=1)).date().isoformat()
+    return ""
+
+
 def _close(sig: Signal, now: datetime, reason: str) -> None:
     """Stamp a finished signal so the daily review can date its result.
 
@@ -552,13 +574,16 @@ def main(argv: list[str] | None = None) -> int:
     if cfg.daily_report and args.daily and slot is None:
         slot = (daily_report.slot_for(now, cfg.daily_report_hours)
                 or min(cfg.daily_report_hours or [6]))
-    # Analysis of a frozen chart is not analysis. Over the weekend the
-    # last candle simply stops moving, and an hourly read on it would say
-    # the same thing all weekend as though it were news. The slot is left
-    # unstamped so the report goes out on the session that actually opens.
+    # Over the weekend the last candle simply stops moving, so repeating
+    # the analysis every session would send the same reading three times
+    # a day as though it were news. One weekend edition goes out instead,
+    # off Friday's close, and the rest of the weekend stays quiet.
     charts_live = market_open(now) or args.ignore_hours
-    if slot is not None and not charts_live:
-        print("market closed - session analysis skipped")
+    weekend = "" if charts_live else weekend_key(now)
+    weekend_due = bool(weekend) and state.last_weekend_date != weekend
+    if slot is not None and not charts_live and not weekend_due:
+        print("market closed - weekend analysis already sent"
+              if weekend else "market closed - session analysis skipped")
         slot = None
     if cfg.daily_report and slot is not None:
         # One pair per message, every pair, nothing summarised away. A
@@ -571,11 +596,11 @@ def main(argv: list[str] | None = None) -> int:
         ok = 0
         if cfg.outlook:
             tg.send(notifier.format_outlook_header(
-                label, slot, symbols, macro_view, now))
+                label, slot, symbols, macro_view, now, closed=bool(weekend)))
             for symbol in symbols:
                 view = build_outlook(symbol, cache, cfg, news_ctx, macro_view,
                                      session, now)
-                tg.send(notifier.format_outlook(view, now))
+                tg.send(notifier.format_outlook(view, now, closed=bool(weekend)))
                 ok += 0 if view.error else 1
                 if cfg.is_gold(symbol):
                     state.last_gold_outlook_at = now.isoformat(timespec="seconds")
@@ -609,8 +634,10 @@ def main(argv: list[str] | None = None) -> int:
         state.last_daily_slot = daily_report.slot_key(now, slot)
         state.last_daily_date = now.astimezone(
             daily_report.BANGKOK).date().isoformat()
-        print(f"session analysis ({label} {slot:02d}:00) sent for "
-              f"{ok}/{len(symbols)} symbol(s)")
+        if weekend:
+            state.last_weekend_date = weekend
+        print(f"{'weekend' if weekend else 'session'} analysis "
+              f"({label} {slot:02d}:00) sent for {ok}/{len(symbols)} symbol(s)")
 
     # --- Gold on its own hourly clock ---------------------------------
     # Gold is the instrument that moves fastest and is watched closest, so

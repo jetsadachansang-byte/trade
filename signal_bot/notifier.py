@@ -946,7 +946,7 @@ def _num(value: float, digits: int) -> str:
     return f"{value:,.{digits}f}"
 
 
-def format_outlook(o, now=None) -> str:
+def format_outlook(o, now=None, closed: bool = False) -> str:
     """One instrument, one message: trend, levels, what-ifs, and news.
 
     Deliberately built from flowing lines rather than monospace tables.
@@ -968,9 +968,17 @@ def format_outlook(o, now=None) -> str:
                      "ระบบไม่เดาแทน จะวิเคราะห์ใหม่รอบหน้า</i>")
         return "\n".join(lines)
 
-    age = (f" · ช้า {o.price_age_min:.0f} นาที" if o.price_age_min >= 2 else "")
-    lines.append(f"💰 ราคา <b>{_num(o.price, o.digits)}</b> "
-                 f"<i>({_esc(o.quote_tf)}{age})</i>")
+    # Over a closed market the quote is Friday's close, not a stale feed.
+    # Reporting it as "2,900 minutes late" would read as a broken bot.
+    if closed:
+        lines.append(f"💰 ราคาปิดวันศุกร์ <b>{_num(o.price, o.digits)}</b>")
+        lines.append("🔒 <i>ตลาดปิดสุดสัปดาห์ — วิเคราะห์จากราคาปิดวันศุกร์ "
+                     "ใช้วางแผนสัปดาห์หน้า ราคาจะยังไม่ขยับจนตลาดเปิด "
+                     "เช้าวันจันทร์</i>")
+    else:
+        age = (f" · ช้า {o.price_age_min:.0f} นาที" if o.price_age_min >= 2 else "")
+        lines.append(f"💰 ราคา <b>{_num(o.price, o.digits)}</b> "
+                     f"<i>({_esc(o.quote_tf)}{age})</i>")
 
     # --- the big picture ------------------------------------------------
     lines += ["", "<b>━━ ภาพรวม ━━</b>", _esc(o.long_term), _esc(o.alignment)]
@@ -1052,7 +1060,8 @@ def format_outlook(o, now=None) -> str:
 
 
 def format_outlook_header(session_name: str, slot: int, symbols,
-                          macro_view=None, now=None) -> str:
+                          macro_view=None, now=None,
+                          closed: bool = False) -> str:
     """The banner that opens a session's run of per-pair analyses.
 
     One line saying what is about to arrive and how the world looks, so a
@@ -1062,10 +1071,15 @@ def format_outlook_header(session_name: str, slot: int, symbols,
     from .daily import BANGKOK, SESSIONS
     stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
     why = SESSIONS.get(slot, ("", ""))[1]
-    lines = [f"📊 <b>บทวิเคราะห์รอบ{session_name} {slot:02d}:00 น.</b> · "
-             f"{stamp.strftime('%d/%m/%Y')}"]
-    if why:
-        lines.append(f"<i>{_esc(why)}</i>")
+    if closed:
+        lines = [f"📊 <b>บทวิเคราะห์สุดสัปดาห์</b> · {stamp.strftime('%d/%m/%Y')}",
+                 "<i>ตลาดปิด — อ่านจากราคาปิดวันศุกร์ เพื่อวางแผนสัปดาห์หน้า "
+                 "ส่งรอบเดียวตลอดเสาร์อาทิตย์ เพราะกราฟจะไม่ขยับอีกจนวันจันทร์</i>"]
+    else:
+        lines = [f"📊 <b>บทวิเคราะห์รอบ{session_name} {slot:02d}:00 น.</b> · "
+                 f"{stamp.strftime('%d/%m/%Y')}"]
+        if why:
+            lines.append(f"<i>{_esc(why)}</i>")
 
     if macro_view is not None and getattr(macro_view, "available", False):
         icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(macro_view.risk, "⚪")
