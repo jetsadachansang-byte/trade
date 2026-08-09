@@ -18,9 +18,22 @@ from dataclasses import dataclass, field
 
 from . import smc as S
 
-# How far apart two prices can be and still be the same level, as a
-# fraction of the working ATR.
-CLUSTER_ATR = 0.45
+# How far apart two prices can be and still be the same level.
+#
+# Sizing this off the hourly ATR alone was wrong, and gold showed exactly
+# how wrong: three "different" supports came out 0.48 and 0.52 apart on an
+# instrument that travels sixty-six dollars in an ordinary day. Nobody
+# defends a level to within half a dollar on that chart - it was one level
+# reported three times, and it pushed the levels that actually mattered
+# off the message. What counts as "the same price" has to be judged
+# against how far the instrument moves in a day, not in an hour.
+CLUSTER_ATR = 0.45          # of the hourly ATR
+CLUSTER_DAY = 0.10          # ...or a tenth of the daily range, whichever is more
+
+# Two levels reported next to each other have to be far enough apart to be
+# separate decisions. Below this they are one zone, and the stronger of
+# them is the one worth naming.
+LADDER_GAP_DAY = 0.22       # of the daily range
 
 # Weight per source. A weekly swing is a wall; an hourly swing is a speed
 # bump. These are the only opinions in this module and they are stated
@@ -128,7 +141,7 @@ def _round_numbers(price: float, step: float, reach: float) -> list:
 
 def collect(symbol: str, frames: dict, price: float, atr: float,
             sm=None, swing_bars: int = 3, digits: int = 5,
-            reach: float = 0.0) -> LevelMap:
+            reach: float = 0.0, day_atr: float = 0.0) -> LevelMap:
     """Every level worth watching around the current price.
 
     `atr` is the working ATR (the hourly one) and sets the clustering
@@ -174,11 +187,40 @@ def collect(symbol: str, frames: dict, price: float, atr: float,
     if not raw:
         return out
 
-    merged = _cluster(raw, atr * CLUSTER_ATR, digits)
-    out.above = sorted([lv for lv in merged if lv.price > price],
-                       key=lambda lv: lv.price)[:4]
-    out.below = sorted([lv for lv in merged if lv.price < price],
-                       key=lambda lv: -lv.price)[:4]
+    tolerance = max(atr * CLUSTER_ATR, day_atr * CLUSTER_DAY)
+    merged = _cluster(raw, tolerance, digits)
+
+    # Nearest first, then thinned so the four that get reported describe
+    # the day rather than one crowded corner of it.
+    gap = max(day_atr * LADDER_GAP_DAY, tolerance * 1.5)
+    out.above = _ladder(sorted([lv for lv in merged if lv.price > price],
+                               key=lambda lv: lv.price), gap)
+    out.below = _ladder(sorted([lv for lv in merged if lv.price < price],
+                               key=lambda lv: -lv.price), gap)
+    return out
+
+
+def _ladder(candidates: list, min_gap: float, want: int = 4) -> list:
+    """Thin a crowded list into levels that are separate decisions.
+
+    Taking the four nearest is what produced three supports inside a
+    dollar: when a chart has left a knot of swings right under price, the
+    nearest four are all the same knot. Where several candidates fall
+    inside one zone the strongest is kept - the one with the most reasons
+    behind it is the price the market will actually defend - and the next
+    reported level has to sit a real distance beyond it.
+    """
+    if min_gap <= 0:
+        return candidates[:want]
+    out: list = []
+    for level in candidates:
+        if out and abs(level.price - out[-1].price) < min_gap:
+            if level.strength > out[-1].strength:
+                out[-1] = level          # same zone, better reason
+            continue
+        out.append(level)
+        if len(out) == want:
+            break
     return out
 
 
@@ -223,7 +265,7 @@ def project(lv: LevelMap, daily_atr: float, digits: int = 5,
         return lv
     label = "เป้าจากระยะแกว่งต่อวัน (ไม่ใช่แนวต้านเดิม)"
     label_dn = "เป้าจากระยะแกว่งต่อวัน (ไม่ใช่แนวรับเดิม)"
-    gap = daily_atr * 0.5
+    gap = daily_atr * LADDER_GAP_DAY
 
     for side, sign, text in (("above", 1, label), ("below", -1, label_dn)):
         have = list(getattr(lv, side))
@@ -326,7 +368,7 @@ def expected_range(lv: LevelMap, daily_atr: float, digits: int = 5) -> str:
         return band
     band += f" (ระยะแกว่งเฉลี่ยต่อวัน ~{_fmt(daily_atr, digits)})"
     span = high - low
-    if span < daily_atr * 0.7:
+    if span < daily_atr * 0.6:
         band += (" — แนวสองข้างแคบกว่าที่ราคาปกติวิ่งต่อวัน "
                  "โอกาสหลุดกรอบนี้ภายในวันสูง")
     elif span > daily_atr * 2.0:

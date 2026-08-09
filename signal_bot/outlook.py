@@ -421,7 +421,7 @@ def build(rep, frames: dict, news_ctx, now: datetime,
     out.level_map = LV.collect(symbol, frames, rep.price, rep.atr,
                                sm=getattr(rep, "smart_money", None),
                                swing_bars=swing_bars, digits=digits,
-                               reach=reach)
+                               reach=reach, day_atr=out.daily_atr)
     LV.project(out.level_map, out.daily_atr, digits)
     out.scenarios = LV.scenarios(out.level_map, out.direction,
                                  confirm_tf="H1", digits=digits)
