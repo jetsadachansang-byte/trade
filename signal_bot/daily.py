@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 from . import analyzer as A
 from . import costs as COSTS
+from .data import digits_for as DIGITS_FOR
 from . import exits as EXITS
 from . import macro as MACRO
 from . import regime as REG
@@ -355,7 +356,7 @@ def analyse_symbol(symbol: str, frames: dict, cfg, reg_news_active: bool,
         rep.error = f"ไม่มีข้อมูล: {exc}"
         return rep
 
-    digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
+    digits = DIGITS_FOR(symbol)
     structures = {}
     for tf in LADDER:
         df = frames.get(tf)

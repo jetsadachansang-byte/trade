@@ -36,6 +36,9 @@ TYPICAL_SPREAD = {
     "EURGBP": 0.00020,
     "USDJPY": 0.015, "EURJPY": 0.020, "GBPJPY": 0.030,
     "AUDJPY": 0.025, "CADJPY": 0.030, "CHFJPY": 0.035,
+    # Index CFDs are quoted in points; crypto spreads are far wider than
+    # anything in FX and move with the book.
+    "NAS100": 1.5, "US30": 3.0, "BTCUSD": 12.0,
 }
 
 # Spreads do not stay put when the market moves fast.

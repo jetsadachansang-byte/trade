@@ -256,12 +256,24 @@ def build(now: datetime, currencies: set, pre_minutes: int = 45,
     return ctx
 
 
+# Instruments whose name is not two currency codes. Gold, the US indices
+# and crypto all trade against the dollar and move on US data, so that is
+# the calendar they are read against. Splitting "NAS100" into "NAS"/"100"
+# matched no currency at all, which quietly left them with no news.
+NON_PAIR_CURRENCIES = {
+    "XAUUSD": ("USD",), "XAGUSD": ("USD",),
+    "NAS100": ("USD",), "US30": ("USD",), "US500": ("USD",),
+    "BTCUSD": ("USD",), "ETHUSD": ("USD",),
+}
+
+
 def currencies_for(symbols) -> set:
     """Every currency touched by the symbols under analysis."""
     out = set()
     for symbol in symbols:
-        if symbol == "XAUUSD":
-            out.add("USD")
+        fixed = NON_PAIR_CURRENCIES.get(symbol)
+        if fixed:
+            out.update(fixed)
             continue
         out.add(symbol[:3])
         out.add(symbol[3:])

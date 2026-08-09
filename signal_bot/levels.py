@@ -28,9 +28,13 @@ CLUSTER_ATR = 0.45
 WEIGHT = {"W1": 3.0, "D1": 3.0, "H4": 2.0, "H1": 1.0}
 
 # Round numbers the whole market watches, per instrument type.
+ROUND_STEP = {"XAUUSD": 25.0, "NAS100": 250.0, "US30": 500.0,
+              "BTCUSD": 5000.0}
+
+
 def round_step(symbol: str) -> float:
-    if symbol == "XAUUSD":
-        return 25.0
+    if symbol in ROUND_STEP:
+        return ROUND_STEP[symbol]
     if "JPY" in symbol:
         return 0.50
     return 0.0050
@@ -305,12 +309,26 @@ def scenarios(lv: LevelMap, bias: int, confirm_tf: str = "H1",
 
 
 def expected_range(lv: LevelMap, daily_atr: float, digits: int = 5) -> str:
-    """The band the day is most likely to spend its time inside."""
+    """The band between the nearest levels, checked against the day's range.
+
+    Quoting the gap between the two nearest levels as "where the day will
+    trade" is wrong whenever that gap is narrower than the instrument
+    ordinarily travels in a day - and that is not a rounding problem, it
+    is the most useful thing on the line: it says the market is boxed in
+    and something has to give. So the comparison is made, and stated.
+    """
     if lv.price <= 0:
         return ""
     low = lv.s(1).price if lv.s(1) is not None else lv.price - daily_atr / 2
     high = lv.r(1).price if lv.r(1) is not None else lv.price + daily_atr / 2
     band = f"{_fmt(low, digits)} – {_fmt(high, digits)}"
-    if daily_atr > 0:
-        return f"{band} (ระยะแกว่งเฉลี่ยต่อวัน ~{_fmt(daily_atr, digits)})"
+    if daily_atr <= 0:
+        return band
+    band += f" (ระยะแกว่งเฉลี่ยต่อวัน ~{_fmt(daily_atr, digits)})"
+    span = high - low
+    if span < daily_atr * 0.7:
+        band += (" — แนวสองข้างแคบกว่าที่ราคาปกติวิ่งต่อวัน "
+                 "โอกาสหลุดกรอบนี้ภายในวันสูง")
+    elif span > daily_atr * 2.0:
+        band += " — กรอบกว้างกว่าที่ราคาปกติวิ่งต่อวัน วันเดียวอาจไปไม่ถึงขอบ"
     return band
