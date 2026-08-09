@@ -246,6 +246,30 @@ def profile_threshold(cfg: Settings, prof, shortfall: float) -> float:
     return max(cfg.min_score_floor, base - give)
 
 
+def _week_events(news_ctx, now: datetime, symbols) -> tuple:
+    """Next week's calendar for the instruments covered, and any error.
+
+    Forex Factory's "this week" file rolls over on Sunday, so the Sunday
+    round reads the week that is about to start rather than the one that
+    just finished. Nothing is invented: with no readable calendar the
+    briefing says so and offers no news reasoning at all.
+    """
+    wanted = news_feed.currencies_for(list(symbols))
+    try:
+        raw = news_feed.fetch()
+    except Exception as exc:            # noqa: BLE001 - degraded, not fatal
+        # One fallback: the run's own context covers today only, which is
+        # better than nothing but must not be passed off as the week.
+        if news_ctx is not None and getattr(news_ctx, "available", False):
+            partial = [e for e in news_ctx.day_events if e.currency in wanted]
+            if partial:
+                return (sorted(partial, key=lambda e: e.when),
+                        "ดึงปฏิทินทั้งสัปดาห์ไม่ได้ — แสดงเท่าที่มีของวันนี้")
+        return [], str(exc)[:120]
+    events = [e for e in raw if e.currency in wanted and e.when >= now]
+    return sorted(events, key=lambda e: e.when), ""
+
+
 def build_outlook(symbol: str, cache: market_data.Cache, cfg: Settings,
                   news_ctx, macro_view, session: str, now: datetime):
     """The full trend read on one instrument, or one carrying its error.
@@ -497,6 +521,13 @@ def main(argv: list[str] | None = None) -> int:
     # cadence, because nothing underneath either of them can change.
     charts_live = market_open(now) or args.ignore_hours
     weekend = "" if charts_live else weekend_key(now)
+    # The one weekend round lands on Sunday: it is a look at the week
+    # about to start, not a post-mortem of the one that just ended, and a
+    # plan read on Saturday morning has two days to go stale before it is
+    # used. Everything closed-market waits for that slot.
+    weekend_slot = bool(weekend) and (
+        now.astimezone(daily_report.BANGKOK).weekday()
+        == cfg.weekend_report_weekday)
 
     # Whether this run is one that loads gold at all. Read before the scan,
     # because the scan stamps the clock it is derived from - afterwards the
@@ -506,7 +537,13 @@ def main(argv: list[str] | None = None) -> int:
 
     rejections, errors, views = [], [], []
     scanned = False
-    if not (market_open(now) or args.ignore_hours):
+    if not cfg.signals:
+        # The bot analyses the market; it does not call entries any more.
+        # Positions already issued are still tracked to their conclusion
+        # above - closing the door does not mean walking away from what is
+        # already through it - but nothing new is opened.
+        print("signals: off (SIGNALS=false) - analysis only, no entry tickets")
+    elif not (market_open(now) or args.ignore_hours):
         print("market closed - no scan")
     elif not (in_kz or args.ignore_hours):
         print(f"outside kill zones (UTC hour {now.hour}) - no scan")
@@ -550,7 +587,7 @@ def main(argv: list[str] | None = None) -> int:
     # weekend is the whole of the information.
     status_due = day_review.status_due(state, now, cfg.plan_status_hours)
     if weekend:
-        status_due = state.last_weekend_status != weekend
+        status_due = weekend_slot and state.last_weekend_status != weekend
     if status_due:
         plans = day_review.board(state, now, cfg.plan_status_window)
         tg.send(notifier.format_plan_status(plans, now, closed=bool(weekend)))
@@ -597,10 +634,10 @@ def main(argv: list[str] | None = None) -> int:
     # candle simply stops moving, so repeating the analysis every session
     # would send the same reading three times a day as though it were
     # news. One weekend edition goes out instead, off Friday's close.
-    weekend_due = bool(weekend) and state.last_weekend_date != weekend
+    weekend_due = weekend_slot and state.last_weekend_date != weekend
     if slot is not None and not charts_live and not weekend_due:
-        print("market closed - weekend analysis already sent"
-              if weekend else "market closed - session analysis skipped")
+        print("market closed - weekend analysis already sent" if weekend_slot
+              else "market closed - weekend round goes out on Sunday")
         slot = None
     if cfg.daily_report and slot is not None:
         # One pair per message, every pair, nothing summarised away. A
@@ -611,13 +648,23 @@ def main(argv: list[str] | None = None) -> int:
         label = daily_report.SESSIONS.get(slot, ("", ""))[0]
         symbols = cfg.outlook_universe() if cfg.outlook else cfg.daily_symbols
         ok = 0
+        if cfg.outlook and weekend:
+            # Sunday: the week ahead - what the calendar holds and where
+            # each instrument stands going into it.
+            week_events, week_error = _week_events(news_ctx, now, symbols)
+            tg.send(notifier.format_week_ahead(
+                week_events, week_error, symbols, macro_view, now))
         if cfg.outlook:
-            tg.send(notifier.format_outlook_header(
-                label, slot, symbols, macro_view, now, closed=bool(weekend)))
+            if not weekend:
+                tg.send(notifier.format_outlook_header(
+                    label, slot, symbols, macro_view, now))
             for symbol in symbols:
                 view = build_outlook(symbol, cache, cfg, news_ctx, macro_view,
                                      session, now)
-                tg.send(notifier.format_outlook(view, now, closed=bool(weekend)))
+                # Crypto never closes, so its weekend price is live and
+                # must not be labelled as Friday's close.
+                shut = bool(weekend) and not market_data.always_open(symbol)
+                tg.send(notifier.format_outlook(view, now, closed=shut))
                 ok += 0 if view.error else 1
                 if cfg.is_gold(symbol):
                     state.last_gold_outlook_at = now.isoformat(timespec="seconds")

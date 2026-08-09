@@ -47,7 +47,37 @@ YAHOO_SYMBOLS = {
     "USDCAD": ("USDCAD=X",),
     "EURJPY": ("EURJPY=X",), "GBPJPY": ("GBPJPY=X",), "EURGBP": ("EURGBP=X",),
     "AUDJPY": ("AUDJPY=X",), "CADJPY": ("CADJPY=X",), "CHFJPY": ("CHFJPY=X",),
+    # Indices come from the E-mini futures rather than the cash index.
+    # A CFD desk prices NAS100/US30 off the future, and the cash index
+    # only prints during the US session - overnight its chart is a flat
+    # line, which is not what the reader is looking at. The cash index is
+    # kept as a fallback for when the future cannot be reached.
+    "NAS100": ("NQ=F", "^NDX"),
+    "US30": ("YM=F", "^DJI"),
+    # Crypto is its own market: one ticker, and it never closes.
+    "BTCUSD": ("BTC-USD",),
 }
+
+# Instruments that trade around the clock, weekends included. The FX
+# market-closed rules must not be applied to them.
+ALWAYS_OPEN = frozenset({"BTCUSD"})
+
+# Decimal places for display, by instrument. Five for FX majors is right
+# and would be absurd on an index quoted in thousands.
+DIGITS = {
+    "XAUUSD": 2, "NAS100": 2, "US30": 2, "BTCUSD": 2,
+}
+
+
+def digits_for(symbol: str) -> int:
+    """How many decimals this instrument is quoted to."""
+    if symbol in DIGITS:
+        return DIGITS[symbol]
+    return 2 if "JPY" in symbol else 5
+
+
+def always_open(symbol: str) -> bool:
+    return symbol in ALWAYS_OPEN
 
 # Non-spot stand-ins, tried only when explicitly enabled
 # (ALLOW_GOLD_FUTURES). Off by default: no data is better than data from a
@@ -146,6 +176,11 @@ def _yahoo_one(yf_symbol: str, symbol: str, timeframe: str) -> pd.DataFrame:
         "low": quote["low"], "close": quote["close"],
         "volume": quote.get("volume") or [0] * len(quote["open"]),
     }, index=pd.to_datetime(result["timestamp"], unit="s", utc=True))
+    # Volume is missing on some instruments - a cash index reports nulls
+    # rather than zeros. Left as NaN it would take the whole bar down with
+    # it on the dropna below, deleting real OHLC over a field nothing here
+    # gates on. Only a genuine price gap should cost a bar.
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0)
     df = df.dropna().sort_index()
 
     # Yahoo has no 4-hour bars - build them from the hourly series

@@ -112,8 +112,16 @@ class Settings:
     def entry_allowed(self, symbol: str, prof) -> bool:
         return prof.entry_minutes >= self.min_entry_minutes(symbol)
 
+    # --- ส่งสัญญาณเข้าเทรดหรือไม่ ---------------------------------------
+    # ปิดไว้: ระบบนี้ทำหน้าที่วิเคราะห์ตลาดอย่างเดียว ไม่ส่งจุดเข้า
+    # ไม้ที่เคยส่งไปแล้วยังถูกติดตามจนจบ (TP/SL) ไม่ถูกทิ้งกลางทาง
+    # ตั้ง SIGNALS=true ถ้าอยากให้กลับมาส่งจุดเข้าอีกครั้ง
+    signals: bool = field(default_factory=lambda: _env_bool("SIGNALS", False))
+
     # --- symbol universe (priority order matters) --------------------
-    tier1: list[str] = field(default_factory=lambda: _env_list("TIER1_SYMBOLS", "XAUUSD"))
+    # ทอง ดัชนีสหรัฐ และคริปโต มาก่อนคู่เงิน เพราะเป็นตัวที่ดูบ่อยที่สุด
+    tier1: list[str] = field(default_factory=lambda: _env_list(
+        "TIER1_SYMBOLS", "XAUUSD,NAS100,US30,BTCUSD"))
     tier2: list[str] = field(default_factory=lambda: _env_list(
         "TIER2_SYMBOLS", "EURUSD,GBPUSD,USDJPY,USDCHF,AUDUSD,NZDUSD,USDCAD"))
     # The crosses were mapped for both providers but never switched on,
@@ -309,6 +317,10 @@ class Settings:
     # ว่างไว้ = ใช้ทุกคู่ใน universe (tier1+tier2+tier3)
     outlook_symbols: list[str] = field(
         default_factory=lambda: _env_list("OUTLOOK_SYMBOLS", ""))
+    # วันที่ส่งบทวิเคราะห์รอบสุดสัปดาห์ (0=จันทร์ ... 6=อาทิตย์ เวลาไทย)
+    # อาทิตย์ เพราะเป็นบทสรุปข่าวและทิศทางของสัปดาห์ที่กำลังจะเริ่ม
+    weekend_report_weekday: int = field(
+        default_factory=lambda: _env_int("WEEKEND_REPORT_WEEKDAY", 6))
 
 
     # --- scoring weights ---------------------------------------------------

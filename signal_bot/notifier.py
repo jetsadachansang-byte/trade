@@ -405,8 +405,8 @@ _TOTAL_STEPS = 11
 
 def _fmt(value: float, symbol: str) -> str:
     """Price formatting that suits the instrument."""
-    digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
-    return f"{value:.{digits}f}"
+    from .data import digits_for
+    return f"{value:.{digits_for(symbol)}f}"
 
 
 # A phone fits roughly this many monospace characters inside a <pre> block.
@@ -919,7 +919,7 @@ def format_weekly(rev, memory_line: str = "") -> str:
 # ----------------------------------------------------------------------
 # Trend Outlook - the full read on one instrument, one message per pair.
 # ----------------------------------------------------------------------
-_SYMBOL_ICON = {"XAUUSD": "🥇"}
+_SYMBOL_ICON = {"XAUUSD": "🥇", "NAS100": "📈", "US30": "🏛", "BTCUSD": "₿"}
 _VOL_TH = {"high": "สูง", "normal": "ปกติ", "low": "ต่ำ"}
 
 
@@ -983,34 +983,23 @@ def format_outlook(o, now=None, closed: bool = False) -> str:
         lines.append(f"💰 ราคา <b>{_num(o.price, o.digits)}</b> "
                      f"<i>({_esc(o.quote_tf)}{age})</i>")
 
-    # --- the big picture ------------------------------------------------
-    lines += ["", "<b>━━ ภาพรวม ━━</b>", _esc(o.long_term), _esc(o.alignment)]
+    # --- the big picture: the tide -------------------------------------
+    lines += ["", "<b>━━ ภาพรวมใหญ่ (W1 · D1) ━━</b>", _esc(o.long_term)]
+    for line in o.big_picture:
+        lines.append(f"• {_esc(line)}")
+
+    # --- the small picture: the waves ----------------------------------
+    lines += ["", "<b>━━ ภาพรวมย่อย (H4 · H1 · M15 · M5) ━━</b>"]
+    for line in o.small_picture:
+        lines.append(f"• {_esc(line)}")
     if o.regime:
         vol = _VOL_TH.get(o.volatility, o.volatility)
-        lines.append(f"สภาพตลาด: <b>{_esc(o.regime)}</b> "
+        lines.append(f"• สภาพตลาด: <b>{_esc(o.regime)}</b> "
                      f"(มั่นใจ {o.regime_confidence:.0f}%) · ความผันผวน{vol}")
 
-    # The plain answer first: everything below is the reasoning behind it.
-    # With the market shut there is no "now" to answer for, so the same
-    # verdict is stated as what to carry into next week instead.
-    if closed:
-        v_word = {"BUY": "ฝั่ง BUY ได้เปรียบ",
-                  "SELL": "ฝั่ง SELL ได้เปรียบ"}.get(
-                      o.verdict, "ยังไม่เลือกข้าง")
-        lines.append(f"🔭 <b>แนวโน้มสัปดาห์หน้า: {v_word}</b> — "
-                     "รอตลาดเปิดเช้าวันจันทร์แล้วดูว่าโครงสร้างยังเป็นแบบนี้อยู่ไหม "
-                     "ก่อนตัดสินใจ")
-    else:
-        v_icon = {"BUY": "🟢", "SELL": "🔴"}.get(o.verdict, "⚪")
-        v_word = {"BUY": "มีความได้เปรียบฝั่ง BUY",
-                  "SELL": "มีความได้เปรียบฝั่ง SELL"}.get(
-                      o.verdict, "ยังไม่ควรเข้า รอให้ชัดก่อน")
-        why = f" — {_esc(o.verdict_why)}" if o.verdict_why else ""
-        lines.append(f"{v_icon} <b>ตอนนี้: {v_word}</b>{why}")
-
-    # --- every timeframe ------------------------------------------------
+    # --- every timeframe, one line each --------------------------------
     if o.reads:
-        lines += ["", "<b>━━ แนวโน้มรายทามเฟรม ━━</b>"]
+        lines += ["", "<b>━━ อ่านทีละทามเฟรม ━━</b>"]
         for r in o.reads:
             note = f" · {_esc(r.note)}" if r.note else ""
             lines.append(f"{r.arrow} <b>{r.tf}</b> {r.word}{note}")
@@ -1026,7 +1015,8 @@ def format_outlook(o, now=None, closed: bool = False) -> str:
         for n, level in enumerate(lv.below, start=1):
             lines.append(f"🔻 <b>รับ {n}</b> {_num(level.price, o.digits)} "
                          f"{level.stars} · {_esc(level.why)}")
-        lines.append("<i>★ ยิ่งมาก = ยิ่งมีเหตุผลหลายอย่างมาชนกันที่ราคานั้น</i>")
+        lines.append("<i>★ ยิ่งมาก = ยิ่งมีเหตุผลหลายอย่างมาชนกันที่ราคานั้น "
+                     "· ◻ = เป้าที่คำนวณจากระยะแกว่ง ไม่ใช่แนวเดิม</i>")
 
     # --- point by point --------------------------------------------------
     if o.scenarios:
@@ -1037,6 +1027,29 @@ def format_outlook(o, now=None, closed: bool = False) -> str:
             lines.append(f"    ↳ {_esc(sc.outcome)}")
     if o.range_note:
         lines.append(f"📏 กรอบที่น่าจะแกว่ง {_esc(o.range_note)}")
+
+    # --- the decisive part ----------------------------------------------
+    # Everything above is evidence; this is the answer it adds up to.
+    # With the market shut there is no "now" to answer for, so the same
+    # verdict is stated as what to carry into next week instead.
+    lines += ["", "<b>━━ สรุปทิศทาง ━━</b>"]
+    if closed:
+        v_word = {"BUY": "ฝั่ง BUY ได้เปรียบ",
+                  "SELL": "ฝั่ง SELL ได้เปรียบ"}.get(
+                      o.verdict, "ยังไม่เลือกข้าง")
+        lines.append(f"🔭 <b>แนวโน้มสัปดาห์หน้า: {v_word}</b> — "
+                     "รอตลาดเปิดแล้วดูว่าโครงสร้างยังเป็นแบบนี้อยู่ไหมก่อนตัดสินใจ")
+    else:
+        v_icon = {"BUY": "🟢", "SELL": "🔴"}.get(o.verdict, "⚪")
+        v_word = {"BUY": "ภาพเอียงไปฝั่ง BUY",
+                  "SELL": "ภาพเอียงไปฝั่ง SELL"}.get(
+                      o.verdict, "ยังไม่เลือกข้าง รอให้ชัดก่อน")
+        why = f" — {_esc(o.verdict_why)}" if o.verdict_why else ""
+        lines.append(f"{v_icon} <b>ตอนนี้: {v_word}</b>{why}")
+    if o.primary_path:
+        lines.append(f"🧭 <b>ทางหลัก:</b> {_esc(o.primary_path)}")
+    if o.alternate_path:
+        lines.append(f"↩️ <b>ทางรอง:</b> {_esc(o.alternate_path)}")
     if o.invalidation:
         lines.append(f"🚫 {_esc(o.invalidation)}")
 
@@ -1067,14 +1080,13 @@ def format_outlook(o, now=None, closed: bool = False) -> str:
         lines.append(f"{icon2} <b>{local}</b> {e.currency} · "
                      f"{_esc(e.title)}{tail}")
 
-    lines += ["", "⚠️ <i>บทวิเคราะห์เพื่อวางแผน ไม่ใช่คำสั่งเข้า · "
-              "จุดเข้าจริงระบบส่งแยกเมื่อเงื่อนไขครบทุกข้อ</i>"]
+    lines += ["", "⚠️ <i>บทวิเคราะห์ทางเทคนิคเพื่อวางแผน ไม่ใช่คำสั่งซื้อขาย · "
+              "การตัดสินใจเข้าออกและการบริหารความเสี่ยงเป็นของผู้อ่านทั้งหมด</i>"]
     return "\n".join(lines)
 
 
 def format_outlook_header(session_name: str, slot: int, symbols,
-                          macro_view=None, now=None,
-                          closed: bool = False) -> str:
+                          macro_view=None, now=None) -> str:
     """The banner that opens a session's run of per-pair analyses.
 
     One line saying what is about to arrive and how the world looks, so a
@@ -1084,15 +1096,10 @@ def format_outlook_header(session_name: str, slot: int, symbols,
     from .daily import BANGKOK, SESSIONS
     stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
     why = SESSIONS.get(slot, ("", ""))[1]
-    if closed:
-        lines = [f"📊 <b>บทวิเคราะห์สุดสัปดาห์</b> · {stamp.strftime('%d/%m/%Y')}",
-                 "<i>ตลาดปิด — อ่านจากราคาปิดวันศุกร์ เพื่อวางแผนสัปดาห์หน้า "
-                 "ส่งรอบเดียวตลอดเสาร์อาทิตย์ เพราะกราฟจะไม่ขยับอีกจนวันจันทร์</i>"]
-    else:
-        lines = [f"📊 <b>บทวิเคราะห์รอบ{session_name} {slot:02d}:00 น.</b> · "
-                 f"{stamp.strftime('%d/%m/%Y')}"]
-        if why:
-            lines.append(f"<i>{_esc(why)}</i>")
+    lines = [f"📊 <b>บทวิเคราะห์รอบ{session_name} {slot:02d}:00 น.</b> · "
+             f"{stamp.strftime('%d/%m/%Y')}"]
+    if why:
+        lines.append(f"<i>{_esc(why)}</i>")
 
     if macro_view is not None and getattr(macro_view, "available", False):
         icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(macro_view.risk, "⚪")
@@ -1106,4 +1113,79 @@ def format_outlook_header(session_name: str, slot: int, symbols,
 
     lines.append(f"📨 กำลังส่งบทวิเคราะห์ <b>{len(list(symbols))}</b> คู่ "
                  "<i>(คู่ละ 1 ข้อความ)</i>")
+    return "\n".join(lines)
+
+
+_DAY_TH = ("จันทร์", "อังคาร", "พุธ", "พฤหัส", "ศุกร์", "เสาร์", "อาทิตย์")
+
+
+def format_week_ahead(events, error: str, symbols, macro_view=None,
+                      now=None) -> str:
+    """Sunday: the calendar for the week starting, and how to approach it.
+
+    The weekend message is not a smaller version of a weekday one. Nothing
+    is tradable while the market is shut, so what is worth saying is what
+    is *coming*: which days carry risk, which sessions to be careful in,
+    and what the tape closed the week believing.
+    """
+    from .daily import BANGKOK
+    stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
+    lines = [f"🗓 <b>สรุปสัปดาห์หน้า</b> · เริ่ม {stamp.strftime('%d/%m/%Y')}",
+             "<i>ตลาดปิดสุดสัปดาห์ · ส่งรอบเดียว แล้วกลับไปส่งตามเซสชั่น"
+             "ตั้งแต่เช้าวันจันทร์</i>"]
+
+    if macro_view is not None and getattr(macro_view, "available", False):
+        icon = {"Risk On": "🟢", "Risk Off": "🔴"}.get(macro_view.risk, "⚪")
+        row = " · ".join(
+            f"{n} {'▲' if macro_view.changes[n] > 0 else '▼'}{macro_view.changes[n]:+.1f}%"
+            for n in ("DXY", "US10Y", "VIX") if n in macro_view.changes)
+        lines.append(f"{icon} ตลาดปิดสัปดาห์ในโหมด <b>{_esc(macro_view.risk)}</b>"
+                     + (f" · {row}" if row else ""))
+    else:
+        lines.append("⚪ <i>ภาพมหภาครอบนี้ดึงไม่ได้ — ไม่นำมาใช้เป็นเหตุผล</i>")
+
+    # --- the calendar ----------------------------------------------------
+    lines += ["", "<b>━━ ข่าวสำคัญสัปดาห์หน้า ━━</b>"]
+    if error:
+        lines += ["⚠️ <b>ดึงปฏิทินข่าวไม่สำเร็จ</b>",
+                  f"<i>{_esc(error[:140])}</i>",
+                  "<i>สัปดาห์นี้ระบบจะไม่ใช้ข่าวประกอบการวิเคราะห์ และจะไม่เดา"
+                  "ว่ามีข่าวอะไร — เช็คปฏิทินเองก่อนเทรด</i>"]
+    elif not events:
+        lines.append("<i>ปฏิทินยังไม่มีรายการของสกุลที่ระบบติดตามในสัปดาห์นี้</i>")
+    else:
+        high = [e for e in events if e.high]
+        mid = [e for e in events if e.impact.lower() == "medium"]
+        lines.append(f"🔴 แรง {len(high)} · 🟠 กลาง {len(mid)} รายการ "
+                     "<i>(เวลาไทย · ที่มา Forex Factory)</i>")
+        shown = sorted((e for e in events
+                        if e.impact.lower() in ("high", "medium")),
+                       key=lambda e: e.when)
+        day = None
+        for e in shown[:24]:
+            local = e.when.astimezone(BANGKOK)
+            key = local.date()
+            if key != day:
+                day = key
+                lines.append(f"<b>{_DAY_TH[local.weekday()]} "
+                             f"{local.strftime('%d/%m')}</b>")
+            icon2, _ = _IMPACT.get(e.impact.lower(), ("⚪", ""))
+            lines.append(f"  {icon2} {local.strftime('%H:%M')} {e.currency} · "
+                         f"{_esc(e.title)}")
+        if len(shown) > 24:
+            lines.append(f"<i>…และอีก {len(shown) - 24} รายการ</i>")
+        if high:
+            days = sorted({e.when.astimezone(BANGKOK).weekday() for e in high})
+            lines.append("⚠️ <i>วันที่ต้องระวังเป็นพิเศษ: "
+                         + " · ".join(_DAY_TH[d] for d in days) + "</i>")
+
+    lines += ["", "<b>━━ เตรียมตัวสำหรับสัปดาห์หน้า ━━</b>",
+              f"📨 บทวิเคราะห์รายตัวของ <b>{len(list(symbols))}</b> ตัว "
+              "ตามมาข้างล่างนี้ ตัวละ 1 ข้อความ",
+              "• อ่านทิศทางหลักจาก W1/D1 ก่อน แล้วค่อยดูว่า TF เล็กอยู่ช่วง"
+              "ย่อหรือช่วงออกตัว",
+              "• จดแนวที่มีดาวเยอะไว้ — เป็นจุดที่ตลาดตัดสินใจ",
+              "• เช้าวันจันทร์ตลาดอาจเปิดกระโดด (gap) ให้รอแท่งแรกปิดก่อน "
+              "อย่าเชื่อราคาช่วงเปิดทันที",
+              "⚠️ <i>บทวิเคราะห์เพื่อวางแผน ไม่ใช่คำสั่งเข้า</i>"]
     return "\n".join(lines)

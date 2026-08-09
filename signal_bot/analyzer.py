@@ -25,7 +25,7 @@ from . import smc as S
 from . import strategy as STRAT
 from . import voters as VOTE
 from .config import Settings
-from .data import freshness
+from .data import digits_for as DIGITS_FOR, freshness
 from .profiles import Profile
 
 
@@ -559,7 +559,7 @@ def analyse(symbol: str, tier: int, frames: dict[str, pd.DataFrame],
     # floor is applied last so it beats the style's own ceiling: a stop
     # wider than the style intended is a worse trade, a stop inside the
     # spread is not a trade at all.
-    digits = 2 if "JPY" in symbol or symbol == "XAUUSD" else 5
+    digits = DIGITS_FOR(symbol)
     floor, floor_why = COSTS.stop_floor(
         symbol, entry_df, reg.volatility,
         spread_multiple=cfg.min_sl_spreads,
