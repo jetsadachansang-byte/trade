@@ -16,6 +16,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
+from . import chart as chart_img
 from . import daily as daily_report
 from . import data as market_data
 from . import macro as macro_feed
@@ -246,6 +247,51 @@ def profile_threshold(cfg: Settings, prof, shortfall: float) -> float:
     return max(cfg.min_score_floor, base - give)
 
 
+class ChartSender:
+    """Sends the picture that goes with each analysis, if one is configured.
+
+    Holds two pieces of state for the run: whether the quota is spent -
+    once it is, sixteen more attempts help nobody - and whether the
+    reader has already been told that images are failing, so a broken key
+    produces one visible note rather than seventeen.
+    """
+
+    def __init__(self, cfg: Settings, tg: notifier.Telegram):
+        self.cfg, self.tg = cfg, tg
+        self.stopped = ""
+        self.told = False
+        self.sent = 0
+
+    def send(self, view, now: datetime) -> str:
+        """Returns a note to append to the text message, usually empty."""
+        symbol = view.symbol
+        if not self.cfg.chart_wanted(symbol) or self.stopped:
+            return ""
+        tf = self.cfg.chart_timeframe
+        try:
+            image = chart_img.fetch(
+                symbol, tf, self.cfg.chart_img_key,
+                theme=self.cfg.chart_theme, width=self.cfg.chart_width,
+                height=self.cfg.chart_height)
+        except chart_img.ChartError as exc:
+            reason = str(exc)
+            print(f"chart {symbol}: {reason}")
+            if chart_img.quota_exhausted(reason):
+                self.stopped = reason
+                print("chart: quota looks spent - no more images this run")
+            if self.told:
+                return ""
+            self.told = True
+            return f"\n🖼 <i>ดึงรูปกราฟไม่สำเร็จรอบนี้ ({notifier._esc(reason[:90])})</i>"
+
+        ok = self.tg.send_photo(
+            image, caption=notifier.format_chart_caption(view, tf, now),
+            filename=f"{symbol}_{tf}.png")
+        if ok:
+            self.sent += 1
+        return ""
+
+
 def _week_events(news_ctx, now: datetime, symbols) -> tuple:
     """Next week's calendar for the instruments covered, and any error.
 
@@ -430,6 +476,39 @@ def _send_batches(tg: notifier.Telegram, short_batch: list,
             tg.send(notifier.format_signal(cand, signal_id, prof))
 
 
+def chart_test(symbol: str, dry_run: bool = False) -> int:
+    """Fetch and send one chart, printing exactly what happened.
+
+    The sandbox this was written in cannot reach chart-img at all, so the
+    first proof that the key, the endpoint and the symbol mapping are
+    right has to come from a real run. This is that check, and it costs
+    one image instead of a session's worth.
+    """
+    cfg = Settings()
+    print(f"chart test: {symbol} -> {chart_img.tv_symbol(symbol)} "
+          f"@ {cfg.chart_timeframe}")
+    if not cfg.chart_img_key:
+        print("chart test: CHART_IMG_KEY ยังไม่ได้ตั้ง (ใส่ใน GitHub Secrets)")
+        return 1
+    try:
+        image = chart_img.fetch(symbol, cfg.chart_timeframe, cfg.chart_img_key,
+                                theme=cfg.chart_theme, width=cfg.chart_width,
+                                height=cfg.chart_height)
+    except chart_img.ChartError as exc:
+        print(f"chart test: FAILED - {exc}")
+        return 1
+    print(f"chart test: ok, {len(image):,} bytes")
+    tg = notifier.Telegram(cfg.telegram_token, cfg.telegram_chat_id, dry_run)
+    sent = tg.send_photo(
+        image,
+        caption=f"🧪 <b>ทดสอบรูปกราฟ</b> · {symbol} · {cfg.chart_timeframe}\n"
+                f"<i>{chart_img.tv_symbol(symbol)} · chart-img.com</i>",
+        filename=f"{symbol}.png")
+    print("chart test: sent to Telegram" if sent else
+          "chart test: image fetched but Telegram refused it")
+    return 0 if sent else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true",
@@ -442,7 +521,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="send the daily result review now, ignoring the clock")
     parser.add_argument("--ignore-hours", action="store_true",
                         help="skip market-hours and kill-zone checks (for testing)")
+    parser.add_argument("--chart-test", metavar="SYMBOL", nargs="?",
+                        const="XAUUSD",
+                        help="fetch one chart image and send it, then stop "
+                             "(checks the chart-img key and symbol mapping)")
     args = parser.parse_args(argv)
+
+    if args.chart_test:
+        return chart_test(args.chart_test, args.dry_run)
 
     cfg = Settings()
     problems = cfg.validate()
@@ -456,6 +542,11 @@ def main(argv: list[str] | None = None) -> int:
     tg = notifier.Telegram(cfg.telegram_token, cfg.telegram_chat_id,
                            args.dry_run, archive=archive, now=now)
     state = State.load()
+    charts = ChartSender(cfg, tg)
+    if cfg.charts_on:
+        print(f"charts: on · {cfg.chart_timeframe} · "
+              + (", ".join(cfg.chart_symbols) if cfg.chart_symbols
+                 else "ทุกตัวที่วิเคราะห์"))
 
     # --- answer anything typed into the chat --------------------------
     # Done before anything else so a search is answered on the run it was
@@ -664,7 +755,8 @@ def main(argv: list[str] | None = None) -> int:
                 # Crypto never closes, so its weekend price is live and
                 # must not be labelled as Friday's close.
                 shut = bool(weekend) and not market_data.always_open(symbol)
-                tg.send(notifier.format_outlook(view, now, closed=shut))
+                note = charts.send(view, now)
+                tg.send(notifier.format_outlook(view, now, closed=shut) + note)
                 ok += 0 if view.error else 1
                 if cfg.is_gold(symbol):
                     state.last_gold_outlook_at = now.isoformat(timespec="seconds")
@@ -721,7 +813,8 @@ def main(argv: list[str] | None = None) -> int:
             for symbol in cfg.gold_symbols:
                 view = build_outlook(symbol, cache, cfg, news_ctx, macro_view,
                                      session, now)
-                tg.send(notifier.format_outlook(view, now))
+                note = charts.send(view, now)
+                tg.send(notifier.format_outlook(view, now) + note)
                 print(f"gold outlook sent: {symbol}"
                       + (f" (error: {view.error[:60]})" if view.error else ""))
             state.last_gold_outlook_at = now.isoformat(timespec="seconds")

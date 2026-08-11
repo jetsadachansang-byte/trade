@@ -36,6 +36,10 @@ on:
         description: "ส่งสรุปผลรายวันทันที (ไม่ต้องรอ 05:00 น.)"
         type: boolean
         default: false
+      chart_test:
+        description: "ทดสอบรูปกราฟ chart-img (ใส่ชื่อ symbol เช่น XAUUSD)"
+        type: string
+        default: ""
 
 # กันไม่ให้รันซ้อนกันจนสถานะสัญญาณเพี้ยน
 concurrency:
@@ -109,7 +113,20 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          # รูปกราฟจาก chart-img.com — ไม่ใส่ = ส่งเฉพาะบทวิเคราะห์ตัวหนังสือ
+          CHART_IMG_KEY: ${{ secrets.CHART_IMG_KEY }}
           # --- ค่าที่ปรับได้ผ่าน Variables (ไม่ตั้งก็ใช้ค่าเริ่มต้น) ---
+          SIGNALS: ${{ vars.SIGNALS }}
+          OUTLOOK: ${{ vars.OUTLOOK }}
+          OUTLOOK_GOLD_HOURS: ${{ vars.OUTLOOK_GOLD_HOURS }}
+          OUTLOOK_SYMBOLS: ${{ vars.OUTLOOK_SYMBOLS }}
+          WEEKEND_REPORT_WEEKDAY: ${{ vars.WEEKEND_REPORT_WEEKDAY }}
+          CHART_TIMEFRAME: ${{ vars.CHART_TIMEFRAME }}
+          CHART_SYMBOLS: ${{ vars.CHART_SYMBOLS }}
+          CHART_THEME: ${{ vars.CHART_THEME }}
+          CHART_WIDTH: ${{ vars.CHART_WIDTH }}
+          CHART_HEIGHT: ${{ vars.CHART_HEIGHT }}
+          CHART_STUDIES: ${{ vars.CHART_STUDIES }}
           PROFILES: ${{ vars.PROFILES }}
           TIER1_SYMBOLS: ${{ vars.TIER1_SYMBOLS }}
           TIER2_SYMBOLS: ${{ vars.TIER2_SYMBOLS }}
@@ -168,12 +185,15 @@ jobs:
           RUN_IGNORE_HOURS: ${{ inputs.ignore_hours }}
           RUN_DAILY: ${{ inputs.daily }}
           RUN_SUMMARY: ${{ inputs.summary }}
+          RUN_CHART_TEST: ${{ inputs.chart_test }}
         run: |
           args=""
           [ "$RUN_STATUS" = "true" ] && args="$args --status"
           [ "$RUN_IGNORE_HOURS" = "true" ] && args="$args --ignore-hours"
           [ "$RUN_DAILY" = "true" ] && args="$args --daily"
           [ "$RUN_SUMMARY" = "true" ] && args="$args --summary"
+          # ทดสอบรูปกราฟ: ดึงรูปเดียวแล้วจบ ไม่ไปแตะสถานะหรือส่งอย่างอื่น
+          [ -n "$RUN_CHART_TEST" ] && args="--chart-test $RUN_CHART_TEST"
           echo "รันคำสั่ง: python -m signal_bot.main $args"
           python -m signal_bot.main $args
 
