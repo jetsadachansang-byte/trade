@@ -317,6 +317,23 @@ class Settings:
     # ว่างไว้ = ใช้ทุกคู่ใน universe (tier1+tier2+tier3)
     outlook_symbols: list[str] = field(
         default_factory=lambda: _env_list("OUTLOOK_SYMBOLS", ""))
+    # --- รูปกราฟจาก chart-img.com --------------------------------------
+    # ใส่คีย์ใน GitHub Secrets ชื่อ CHART_IMG_KEY เท่านั้น ห้ามเขียนในโค้ด
+    # ไม่ใส่ = ไม่ส่งรูป บทวิเคราะห์ตัวหนังสือยังทำงานปกติทุกอย่าง
+    chart_img_key: str = field(
+        default_factory=lambda: _env_str("CHART_IMG_KEY"))
+    # ไทม์เฟรมของรูปที่ส่ง (ค่าเดียว เพื่อคุมโควตา API)
+    chart_timeframe: str = field(
+        default_factory=lambda: _env_str("CHART_TIMEFRAME", "H1").upper())
+    # ว่าง = ส่งรูปทุกตัวที่วิเคราะห์ · ใส่รายชื่อเพื่อจำกัดเฉพาะตัวที่ดูจริง
+    # (โควตาของ chart-img นับเป็นรูป การส่งครบ 17 ตัวทุกเซสชั่นกินโควตาเร็ว)
+    chart_symbols: list[str] = field(
+        default_factory=lambda: _env_list("CHART_SYMBOLS", ""))
+    chart_theme: str = field(
+        default_factory=lambda: _env_str("CHART_THEME", "dark"))
+    chart_width: int = field(default_factory=lambda: _env_int("CHART_WIDTH", 800))
+    chart_height: int = field(default_factory=lambda: _env_int("CHART_HEIGHT", 500))
+
     # วันที่ส่งบทวิเคราะห์รอบสุดสัปดาห์ (0=จันทร์ ... 6=อาทิตย์ เวลาไทย)
     # อาทิตย์ เพราะเป็นบทสรุปข่าวและทิศทางของสัปดาห์ที่กำลังจะเริ่ม
     weekend_report_weekday: int = field(
@@ -371,6 +388,16 @@ class Settings:
         for tier, symbols in ((1, self.tier1), (2, self.tier2), (3, self.tier3)):
             pairs.extend((sym, tier) for sym in symbols)
         return pairs
+
+    @property
+    def charts_on(self) -> bool:
+        return bool(self.chart_img_key)
+
+    def chart_wanted(self, symbol: str) -> bool:
+        """Does this instrument get a picture as well as the write-up?"""
+        if not self.charts_on:
+            return False
+        return not self.chart_symbols or symbol in self.chart_symbols
 
     def outlook_universe(self) -> list[str]:
         """Instruments the trend outlook covers, gold first.

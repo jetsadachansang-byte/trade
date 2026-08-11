@@ -74,6 +74,45 @@ class Telegram:
             self.archive.add(text, self.now or _dt.now(timezone.utc))
         return sent
 
+    # Telegram allows 1024 characters on a photo caption, against 4096 on
+    # a message. The analysis does not fit, so the picture carries a short
+    # caption and the full text follows as its own message.
+    CAPTION_LEN = 1000
+
+    def send_photo(self, image: bytes, caption: str = "",
+                   filename: str = "chart.png", archive: bool = False) -> bool:
+        """Send one image with a short caption.
+
+        A failed image must never take the analysis down with it: the
+        caller sends the text either way, and this returns False rather
+        than raising.
+        """
+        if self.dry_run:
+            print(f"--- TELEGRAM PHOTO (dry run) --- {len(image)} bytes")
+            print(caption)
+            return True
+        try:
+            resp = requests.post(
+                API.format(token=self.token, method="sendPhoto"), timeout=40,
+                data={"chat_id": self.chat_id,
+                      "caption": caption[:self.CAPTION_LEN],
+                      "parse_mode": "HTML"},
+                files={"photo": (filename, image, "image/png")})
+        except Exception as exc:        # noqa: BLE001 - degraded, not fatal
+            print(f"sendPhoto: {exc}")
+            return False
+        if resp.ok:
+            if archive and self.archive is not None:
+                from datetime import datetime as _dt
+                self.archive.add(caption, self.now or _dt.now(timezone.utc))
+            return True
+        try:
+            detail = resp.json().get("description", resp.text)
+        except ValueError:
+            detail = resp.text
+        print(f"sendPhoto error {resp.status_code}: {detail}")
+        return False
+
     def _send_one(self, text: str) -> bool:
         """Send one HTML message. Prints instead of sending in dry-run mode."""
         if self.dry_run:
@@ -1188,4 +1227,36 @@ def format_week_ahead(events, error: str, symbols, macro_view=None,
               "• เช้าวันจันทร์ตลาดอาจเปิดกระโดด (gap) ให้รอแท่งแรกปิดก่อน "
               "อย่าเชื่อราคาช่วงเปิดทันที",
               "⚠️ <i>บทวิเคราะห์เพื่อวางแผน ไม่ใช่คำสั่งเข้า</i>"]
+    return "\n".join(lines)
+
+
+def format_chart_caption(o, timeframe: str, now=None) -> str:
+    """The one-paragraph version, for under the picture.
+
+    A caption competes with the chart for attention, so it carries only
+    what the eye cannot read off the image itself: which way the read
+    leans and the two prices that decide it. The full analysis follows in
+    its own message.
+    """
+    from .daily import BANGKOK
+    stamp = (now or datetime.now(timezone.utc)).astimezone(BANGKOK)
+    icon = _SYMBOL_ICON.get(o.symbol, "💱")
+    lines = [f"{icon} <b>{_esc(o.symbol)}</b> · {_esc(timeframe)} · "
+             f"{stamp.strftime('%d/%m %H:%M')} น."]
+    if o.error:
+        lines.append("⚠️ <i>รอบนี้อ่านข้อมูลไม่ได้ — ดูรายละเอียดในข้อความถัดไป</i>")
+        return "\n".join(lines)
+
+    lines.append(f"💰 {_num(o.price, o.digits)}")
+    lv = o.level_map
+    if lv is not None:
+        if lv.r(1) is not None:
+            lines.append(f"🔺 ต้านแรก {_num(lv.r(1).price, o.digits)} "
+                         f"{lv.r(1).stars}")
+        if lv.s(1) is not None:
+            lines.append(f"🔻 รับแรก {_num(lv.s(1).price, o.digits)} "
+                         f"{lv.s(1).stars}")
+    if o.primary_path:
+        lines.append(f"🧭 {_esc(o.primary_path)}")
+    lines.append("<i>บทวิเคราะห์เต็มอยู่ข้อความถัดไป</i>")
     return "\n".join(lines)
