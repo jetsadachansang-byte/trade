@@ -1,5 +1,5 @@
 {
-  "updated": "2026-09-20T08:50:20+00:00",
+  "updated": "2026-09-20T08:55:23+00:00",
   "last_signal_at": "2026-08-07T21:55:24+00:00",
   "last_briefing_at": "2026-08-04T11:00:35+00:00",
   "last_gold_scan_at": "2026-08-07T21:55:24+00:00",
@@ -11,9 +11,9 @@
       "SP500": 0.17,
       "NASDAQ": 0.39,
       "DOW": -0.18,
-      "OIL": -1.58,
+      "OIL": -5.72,
       "SILVER": 2.56,
-      "BTC": -1.14
+      "BTC": -1.22
     },
     "levels": {
       "DXY": 100.22,
@@ -22,12 +22,12 @@
       "SP500": 7650.5,
       "NASDAQ": 26522.5391,
       "DOW": 51682.6406,
-      "OIL": 100.3,
+      "OIL": 96.08,
       "SILVER": 67.149,
-      "BTC": 80304.0
+      "BTC": 80240.9922
     },
     "risk": "Risk On",
-    "risk_score": 24.7,
+    "risk_score": 24.4,
     "usd_bias": 0,
     "gold_bias": -1,
     "narrative": [
@@ -43,7 +43,7 @@
       "Liquidity จริง (order book / volume จริง) — ฟีดฟรีไม่มีให้"
     ],
     "errors": [],
-    "fetched_at": "2026-09-20T07:50:24+00:00"
+    "fetched_at": "2026-09-20T08:55:22+00:00"
   },
   "last_daily_date": "2026-09-20",
   "last_summary_date": "2026-09-20",
